@@ -86,6 +86,12 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 - **理由**: `next_state` は「相手のターン」の状態。相手が最善手を取ると自分に不利なので、符号を反転して自分にとっての損失として計算する必要があった
 - **効果**: εが下がるにつれて勝率が悪化するバグが解消（500ep時点: 50.4% → 63.2%）
 
+### 中間報酬（シェーピング）の追加（2026-03-16）
+- `env/connect4_env.py` の `step()` に `_shaping_reward()` を追加
+- 直前に置いたコマを起点に連数をカウント（2連=±0.05、3連=±0.1）
+- 盤面全スキャンではなく置いたマス起点のみなので高速（532 eps/s）
+- **効果**: 2000ep時点で 62% → **79%超え**（ep1000〜1500付近でピーク）
+
 ### game_runner.py
 - agent1 = PLAYER1 (X / 赤)、agent2 = PLAYER2 (O / 橙)
 - `GameRunner(env, dqn_agent, random_agent)` でステージ1

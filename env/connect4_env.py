@@ -53,8 +53,41 @@ class Connect4Env:
             self.winner = 0  # draw
             return self.get_state(), 0.0, True, {"winner": 0, "invalid_move": False}
 
+        # 中間報酬: 直前に置いたマスを起点に連数をカウントしてシェーピング
+        shaping = self._shaping_reward(self.current_player, row, col)
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
-        return self.get_state(), 0.0, False, {"winner": None, "invalid_move": False}
+        return self.get_state(), shaping, False, {"winner": None, "invalid_move": False}
+
+    def _shaping_reward(self, player, row, col):
+        """直前に置いた (row, col) を起点に連数を数えてPLAYER1視点の報酬を返す。"""
+        b = self.board
+        sign = 1 if player == self.PLAYER1 else -1
+
+        def count_line(dr, dc):
+            """(dr,dc) 方向と逆方向の連続コマ数（自分のコマのみ）を返す"""
+            n = 0
+            for d in (1, -1):
+                r, c = row + dr * d, col + dc * d
+                while 0 <= r < self.ROWS and 0 <= c < self.COLS and b[r][c] == player:
+                    n += 1
+                    r += dr * d
+                    c += dc * d
+            return n  # 置いたコマ自身は含まない
+
+        max_line = max(
+            count_line(0, 1),   # 横
+            count_line(1, 0),   # 縦
+            count_line(1, 1),   # 斜め右下
+            count_line(1, -1),  # 斜め左下
+        )
+        # 2連=0.05、3連=0.1（4連は勝利なのでここには来ない）
+        if max_line >= 3:
+            reward = 0.1
+        elif max_line >= 2:
+            reward = 0.05
+        else:
+            reward = 0.0
+        return sign * reward
 
     def get_state(self, perspective=None):
         """
