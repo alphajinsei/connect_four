@@ -6,7 +6,7 @@
 ## 学習ロードマップ
 段階的に以下の順で進める：
 1. **相手を固定**（ランダムエージェント） ← 完了（勝率 ~79% 達成）
-2. **カリキュラム学習**（段階的に強い相手と対戦） ← 現在ここ
+2. **カリキュラム学習**（段階的に強い相手と対戦） ← 現在ここ（実装済み・学習実行中）
 3. **Self-play**（自分自身と対戦して強化）
 
 ## 実行環境
@@ -33,8 +33,12 @@
 │   ├── app.py              # Flask サーバー（weights があれば DQNAgent を自動ロード）
 │   └── templates/
 │       └── index.html      # ブラウザUI（アニメーション付き）
+├── weights/
+│   ├── dqn_connect4.npz    # 学習済み重み（学習完了後に保存）
+│   ├── train_log.txt       # 学習ログ（リアルタイム書き出し）
+│   └── snapshots/          # カリキュラム学習のフェーズ移行時スナップショット
 ├── game_runner.py          # ターン管理（env・agent・UIを繋ぐ）
-├── train.py                # 学習スクリプト
+├── train.py                # 学習スクリプト（カリキュラム学習対応済み）
 ├── play.py                 # CLIで人間 vs ランダムAI
 └── CLAUDE.md               # このファイル
 ```
@@ -50,10 +54,20 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 
 ## 学習の実行
 ```bash
+# ステージ1: ランダム相手で学習
 .venv\Scripts\python train.py
-.venv\Scripts\python train.py --episodes 20000  # エピソード数指定
+
+# ステージ2: カリキュラム学習（推奨）
+.venv\Scripts\python train.py --curriculum --episodes 15000
+
+# 手動で特定スナップショットを相手に指定
+.venv\Scripts\python train.py --opponent-path weights/snapshots/snapshot_01_ep2000
+
+# エピソード数・評価間隔を指定
+.venv\Scripts\python train.py --episodes 20000 --eval-interval 500
 ```
 - 完了後 `weights/dqn_connect4.npz` に保存される
+- 学習ログは `weights/train_log.txt` にリアルタイム書き出しされる
 
 ## 設計の重要ポイント
 
@@ -75,11 +89,27 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 ### 現在のハイパーパラメータ（train.py）
 | パラメータ | 値 | 備考 |
 |---|---|---|
-| `epsilon_decay` | 0.9995 | ~100kステップでε=0.05に到達 |
+| `epsilon_decay` | 0.99990 | ~30000ステップ(≒3750ep)でε=0.05に到達 |
 | `warmup_steps` | 2000 | バッファを十分蓄積してから学習開始 |
 | `target_update_interval` | 200 | ターゲットネットをより頻繁に更新 |
 | `buffer_capacity` | 50000 | 多様な経験を保持 |
 | `batch_size` | 128 | 安定した勾配 |
+
+**調整履歴（2026-03-16）:**
+- `epsilon_decay`: `0.9995` → `0.99990` に変更
+  - 旧設定ではwarmup後750epでε=0.05に到達してしまい、探索が早期に終了していた
+  - 新設定で3750epかけてゆっくり探索することで ep1000〜2500 の勝率が 64% → 68〜69% に改善
+
+### カリキュラム学習の設定（train.py）
+| フェーズ | 相手 | 昇格しきい値 |
+|---|---|---|
+| Phase 1 | ランダムAI | 勝率 **65%** 超え |
+| Phase 2 | 弱いDQN（Phase1卒業スナップショット） | 勝率 **60%** 超え |
+| Phase 3 | 中程度のDQN（Phase2卒業スナップショット） | 勝率 **60%** 超え |
+
+- 昇格時に `weights/snapshots/snapshot_NN_epXXXX.npz` を自動保存
+- Phase 2以降の相手のεは `0.05`（少しランダム性を残す）
+- ログは `weights/train_log.txt` にリアルタイム書き出し
 
 ### 重要なバグ修正（2026-03-16）
 - `_train_step`のターゲットQ値計算を `r + γ*maxQ` → `r - γ*maxQ` に修正
@@ -99,19 +129,13 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 
 ## これからの展望
 
-### ステージ2: カリキュラム学習（次のステップ）
-ep1500付近でピーク（~79%）を迎えた後に低下する → ランダム相手への過学習が原因。
-段階的に対戦相手を強化することで汎化性能を上げる：
+### ステージ2: カリキュラム学習（実行中）
+現在 `python train.py --curriculum --episodes 15000` を実行中（2026-03-16）。
+進捗は `weights/train_log.txt` で確認可能。
 
-```
-Phase 1: vs ランダムAI          → 勝率 70% 超えたら次へ
-Phase 2: vs 弱いDQN（過去の自分）→ 勝率 60% 超えたら次へ
-Phase 3: vs 中程度のDQN         → ...
-```
-
-実装方針：
-- `train.py` に `--opponent-path` オプションを追加し、過去の重みをロードしたDQNを相手にできるようにする
-- 勝率を監視し、しきい値を超えたら自動でスナップショットを保存・対戦相手を更新する
+フェーズ移行のパターン：
+- ランダム相手への過学習でε収束後に勝率が下がるのは既知の挙動
+- カリキュラムで相手をDQNスナップショットに切り替えることで汎化性能を上げる狙い
 
 ### ステージ3: Self-play
 `GameRunner(env, dqn_agent, dqn_agent)` の構成で実現可能（設計済み）。

@@ -22,6 +22,24 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+
+class Tee:
+    """stdout とファイルに同時に書き出す"""
+    def __init__(self, path):
+        self._file = open(path, "w", encoding="utf-8", buffering=1)
+        self._stdout = sys.stdout
+
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+
+    def close(self):
+        self._file.close()
+
 from env.connect4_env import Connect4Env
 from agents.dqn_agent import DQNAgent
 from agents.random_agent import RandomAgent
@@ -29,6 +47,7 @@ from game_runner import GameRunner
 
 WEIGHTS_PATH    = "weights/dqn_connect4"
 SNAPSHOTS_DIR   = "weights/snapshots"
+LOG_PATH        = "weights/train_log.txt"
 
 
 def make_agent(**kwargs):
@@ -37,7 +56,7 @@ def make_agent(**kwargs):
         gamma=0.99,
         epsilon_start=1.0,
         epsilon_end=0.05,
-        epsilon_decay=0.9995,
+        epsilon_decay=0.99990,   # ~30000ステップ(≒3750ep)でε=0.05に到達
         buffer_capacity=50000,
         batch_size=128,
         warmup_steps=2000,
@@ -54,6 +73,9 @@ def print_header():
 def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False):
     os.makedirs("weights", exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
+
+    tee = Tee(LOG_PATH)
+    sys.stdout = tee
 
     env   = Connect4Env()
     agent = make_agent()
@@ -82,7 +104,7 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     # カリキュラム学習のフェーズ設定
     # (しきい値, 次フェーズの説明文)
     CURRICULUM_PHASES = [
-        (0.70, "vs ランダム → 勝率70%達成"),
+        (0.65, "vs ランダム → 勝率65%達成"),
         (0.60, "vs 弱いDQN(snapshot) → 勝率60%達成"),
         (0.60, "vs 中程度のDQN(snapshot) → 勝率60%達成"),
     ]
@@ -137,6 +159,9 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
         wr  = np.mean(win_history[i-window:i]) * 100
         bar = '#' * int(wr / 2)
         print(f"Ep {i:>6}: {bar:<50} {wr:.1f}%")
+
+    sys.stdout = tee._stdout
+    tee.close()
 
     return agent
 
