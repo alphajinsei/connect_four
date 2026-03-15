@@ -12,6 +12,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from flask import Flask, render_template, jsonify, request, session
 from env.connect4_env import Connect4Env
 from agents.random_agent import RandomAgent
+from agents.dqn_agent import DQNAgent
+
+WEIGHTS_PATH = "weights/dqn_connect4.npz"
+
+
+def make_opponent():
+    """重みファイルがあれば DQNAgent、なければ RandomAgent を返す"""
+    if os.path.exists(WEIGHTS_PATH):
+        agent = DQNAgent(epsilon_start=0.0, epsilon_end=0.0)  # greedy
+        agent.load(WEIGHTS_PATH)
+        print(f"[WebUI] DQNAgent を読み込みました: {WEIGHTS_PATH}")
+        return agent
+    print("[WebUI] weights が見つかりません。RandomAgent を使用します。")
+    return RandomAgent()
 
 app = Flask(__name__)
 app.secret_key = "connect4-secret"
@@ -27,7 +41,7 @@ def get_game(session_id):
         env.reset()
         games[session_id] = {
             "env": env,
-            "opponent": RandomAgent(),
+            "opponent": make_opponent(),
             "player_is": Connect4Env.PLAYER1,  # 人間は常にPLAYER1
         }
     return games[session_id]
