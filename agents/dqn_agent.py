@@ -185,10 +185,11 @@ class DQNAgent(BaseAgent):
         gamma=0.99,
         epsilon_start=1.0,
         epsilon_end=0.05,
-        epsilon_decay=0.9995,
+        epsilon_decay=0.9999,
         buffer_capacity=20000,
         batch_size=64,
-        target_update_interval=200,
+        warmup_steps=1000,
+        target_update_interval=500,
     ):
         self.action_size = 7
         self.gamma = gamma
@@ -196,6 +197,7 @@ class DQNAgent(BaseAgent):
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
+        self.warmup_steps = warmup_steps
         self.target_update_interval = target_update_interval
         self.total_steps = 0
 
@@ -222,6 +224,9 @@ class DQNAgent(BaseAgent):
         self.replay_buffer.add(state, action, reward, next_state, done)
         self.total_steps += 1
 
+        # ウォームアップ中はバッファ蓄積のみ（学習しない）
+        if self.total_steps < self.warmup_steps:
+            return None
         if len(self.replay_buffer) < self.batch_size:
             return None
 
