@@ -8,6 +8,9 @@ train.py — DQN エージェントの学習スクリプト
     # ステージ2: カリキュラム学習（自動で相手を更新）
     python train.py --curriculum
 
+    # ステージ3: Self-play（カリキュラム学習済み重みから開始）
+    python train.py --selfplay --load-path weights/dqn_connect4 --episodes 20000
+
     # 特定の重みを対戦相手にして学習（手動カリキュラム）
     python train.py --opponent-path weights/snapshot_ep5000
 
@@ -70,7 +73,8 @@ def print_header():
     print("-" * 70)
 
 
-def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False):
+def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False,
+          selfplay=False, load_path=None, selfplay_update_interval=500):
     os.makedirs("weights", exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -78,10 +82,25 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     sys.stdout = tee
 
     env   = Connect4Env()
-    agent = make_agent()
+
+    if load_path:
+        agent = make_agent(epsilon_start=0.10)  # 学習済みから再開: 探索は少なめ
+        agent.load(load_path + ".npz")
+        print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
+    else:
+        agent = make_agent()
 
     # --- 対戦相手の初期化 ---
-    if opponent_path:
+    if selfplay:
+        # Self-play: 最初は現在の重みをコピーして凍結した相手を作成
+        snap_path = os.path.join(SNAPSHOTS_DIR, "selfplay_opponent_init")
+        agent.save(snap_path)
+        opponent = DQNAgent()
+        opponent.load(snap_path + ".npz")
+        opponent.epsilon = 0.05
+        opponent_label = "self(init)"
+        print(f"Self-play モード: {selfplay_update_interval}ep ごとに相手を更新")
+    elif opponent_path:
         opponent = DQNAgent()
         opponent.load(opponent_path + ".npz")
         opponent.epsilon = 0.0  # 推論のみ（探索なし）
@@ -100,6 +119,7 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     win_history    = []
     reward_history = []
     snapshot_count = 0
+    selfplay_update_count = 0
 
     # カリキュラム学習のフェーズ設定
     # (しきい値, 次フェーズの説明文)
@@ -123,6 +143,16 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
             avg_reward = np.mean(reward_history[-500:])
             print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f}")
 
+            # Self-play: 一定間隔で相手を現在の重みで更新
+            if selfplay and episode % selfplay_update_interval == 0:
+                selfplay_update_count += 1
+                snap_path = os.path.join(SNAPSHOTS_DIR, f"selfplay_{selfplay_update_count:03d}_ep{episode}")
+                agent.save(snap_path)
+                opponent.load(snap_path + ".npz")
+                opponent.epsilon = 0.05
+                opponent_label = f"self({selfplay_update_count:03d})"
+                print(f"  [Self-play] 相手を更新: ep{episode} スナップショット → {opponent_label}")
+
             # カリキュラム学習: しきい値を超えたら相手を更新
             if curriculum and curriculum_phase < len(CURRICULUM_PHASES):
                 threshold, phase_desc = CURRICULUM_PHASES[curriculum_phase]
@@ -130,7 +160,7 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
                     snapshot_count += 1
                     snap_path = os.path.join(SNAPSHOTS_DIR, f"snapshot_{snapshot_count:02d}_ep{episode}")
                     agent.save(snap_path)
-                    print(f"\n  ✔ {phase_desc}")
+                    print(f"\n  [OK] {phase_desc}")
                     print(f"  スナップショット保存: {snap_path}.npz")
 
                     curriculum_phase += 1
@@ -168,12 +198,18 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes",       type=int,  default=10000)
-    parser.add_argument("--eval-interval",  type=int,  default=500)
-    parser.add_argument("--opponent-path",  type=str,  default=None,
+    parser.add_argument("--episodes",                type=int,  default=10000)
+    parser.add_argument("--eval-interval",           type=int,  default=500)
+    parser.add_argument("--opponent-path",           type=str,  default=None,
                         help="対戦相手のDQN重みパス（.npz不要）例: weights/snapshots/snapshot_01_ep5000")
-    parser.add_argument("--curriculum",     action="store_true",
+    parser.add_argument("--curriculum",              action="store_true",
                         help="カリキュラム学習モード（勝率しきい値で相手を自動更新）")
+    parser.add_argument("--selfplay",                action="store_true",
+                        help="Self-playモード（一定間隔で相手を自分のスナップショットに更新）")
+    parser.add_argument("--load-path",               type=str,  default=None,
+                        help="学習済み重みをロードして続きから開始 例: weights/dqn_connect4")
+    parser.add_argument("--selfplay-update-interval", type=int, default=500,
+                        help="Self-playで相手を更新する間隔（エピソード数）")
     args = parser.parse_args()
 
     train(
@@ -181,4 +217,7 @@ if __name__ == "__main__":
         eval_interval=args.eval_interval,
         opponent_path=args.opponent_path,
         curriculum=args.curriculum,
+        selfplay=args.selfplay,
+        load_path=args.load_path,
+        selfplay_update_interval=args.selfplay_update_interval,
     )
