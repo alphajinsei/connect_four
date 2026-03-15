@@ -27,11 +27,11 @@ def train(num_episodes=10000, eval_interval=500):
         gamma=0.99,
         epsilon_start=1.0,
         epsilon_end=0.05,
-        epsilon_decay=0.9999,   # 遅くする: 10000ep×25手=250kステップで ε≈0.08 に到達
-        buffer_capacity=20000,
-        batch_size=64,
-        warmup_steps=1000,      # 最初の1000ステップはバッファ蓄積のみ
-        target_update_interval=500,  # ターゲットネットを安定させる
+        epsilon_decay=0.9995,   # 速める: ~100kステップで ε≈0.05 に到達
+        buffer_capacity=50000,  # バッファを大きくして多様な経験を保持
+        batch_size=128,         # バッチを大きくして安定した勾配
+        warmup_steps=2000,      # バッファを十分蓄積してから学習開始
+        target_update_interval=200,  # ターゲットネットをより頻繁に更新
     )
     opponent = RandomAgent()
     runner   = GameRunner(env, agent, opponent, renderer=None)
@@ -63,7 +63,7 @@ def train(num_episodes=10000, eval_interval=500):
     window = 500
     for i in range(window, len(win_history) + 1, window):
         wr = np.mean(win_history[i-window:i]) * 100
-        bar = '█' * int(wr / 2)
+        bar = '#' * int(wr / 2)
         print(f"Ep {i:>6}: {bar:<50} {wr:.1f}%")
 
     return agent

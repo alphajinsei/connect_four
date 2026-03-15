@@ -246,10 +246,12 @@ class DQNAgent(BaseAgent):
         states_flat      = states.reshape(self.batch_size, -1)       # (B, 126)
         next_states_flat = next_states.reshape(self.batch_size, -1)  # (B, 126)
 
-        # ターゲットQ値: r + γ * max Q_target(s', a')
+        # ターゲットQ値: r - γ * max Q_target(s', a')
+        # s' は相手のターン。相手が最善手を取るので、
+        # 相手にとっての最大Q値（= 自分にとっての損失）を引く
         next_q = self.qnet_target.predict(next_states_flat)          # (B, 7)
         max_next_q = np.max(next_q, axis=1)                          # (B,)
-        target_q_values = rewards + self.gamma * max_next_q * (1 - dones)
+        target_q_values = rewards - self.gamma * max_next_q * (1 - dones)
 
         current_q = self.qnet.predict(states_flat)                   # (B, 7)
         target_q = current_q.copy()
