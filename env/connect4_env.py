@@ -63,9 +63,9 @@ class Connect4Env:
         置いた (row, col) を起点に攻防セットの中間報酬を返す（PLAYER1 視点）。
 
         報酬設計:
-          自分の3連を作った    : +0.30
-          自分の2連を作った    : +0.10
-          相手の3連を防いだ    : +0.50
+          自分の3連を作った    : +0.50
+          自分の2連を作った    : +0.15
+          相手の3連を防いだ    : +0.30
           相手の2連を防いだ    : +0.10
           相手の勝ち手を見逃した: -0.80（次に相手が勝てる手がある場合）
         """
@@ -97,15 +97,15 @@ class Connect4Env:
 
         # 攻撃報酬
         if my_max >= 3:
-            attack = 0.30
+            attack = 0.50
         elif my_max >= 2:
-            attack = 0.10
+            attack = 0.15
         else:
             attack = 0.0
 
         # 防御報酬（相手の連を遮断した）
         if opp_max >= 3:
-            defense = 0.50
+            defense = 0.30
         elif opp_max >= 2:
             defense = 0.10
         else:
