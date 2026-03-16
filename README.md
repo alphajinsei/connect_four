@@ -54,6 +54,9 @@ python -m venv .venv
 
 `http://localhost:5000` をブラウザで開いてください。
 
+- **CPU（赤）が先攻、プレイヤー（橙）が後攻**
+- DQNはPLAYER1（先攻）として学習しているため、WebUIもそれに合わせた配置になっています
+
 ## ファイル構成
 
 ```
@@ -67,7 +70,7 @@ python -m venv .venv
 │   ├── rule_based_agent.py     # ルールベースAI（勝ち手・阻止・中央優先）
 │   └── dqn_agent.py            # DQNエージェント（NumPy手書き実装）
 ├── web/
-│   ├── app.py                  # Flask サーバー
+│   ├── app.py                  # Flask サーバー（CPU先攻・プレイヤー後攻）
 │   └── templates/
 │       └── index.html          # ブラウザUI（アニメーション付き）
 ├── weights/

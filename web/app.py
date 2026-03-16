@@ -42,7 +42,7 @@ def get_game(session_id):
         games[session_id] = {
             "env": env,
             "opponent": make_opponent(),
-            "player_is": Connect4Env.PLAYER1,  # 人間は常にPLAYER1
+            "player_is": Connect4Env.PLAYER2,  # 人間は後攻 (PLAYER2)、AIが先攻 (PLAYER1)
         }
     return games[session_id]
 
@@ -71,9 +71,22 @@ def new_game():
         games[sid]["env"].reset()
     else:
         get_game(sid)  # 初期化
-    env = games[sid]["env"]
+    game = games[sid]
+    env = game["env"]
     env.reset()
-    return jsonify(env_to_dict(env))
+
+    # AIが先攻 (PLAYER1) なので、ゲーム開始時に1手打つ
+    opponent = game["opponent"]
+    state = env.get_state(perspective=env.current_player)
+    valid = env.get_valid_actions()
+    ai_col = opponent.get_action(state, valid)
+    ai_row = env._apply_gravity(ai_col)
+    env.step(ai_col)
+
+    result = env_to_dict(env)
+    result["ai_col"] = ai_col
+    result["ai_row"] = ai_row
+    return jsonify(result)
 
 
 @app.route("/api/move", methods=["POST"])
@@ -91,7 +104,11 @@ def move():
     if col is None or col not in env.get_valid_actions():
         return jsonify({"error": "invalid move"}), 400
 
-    # 人間の手が落ちる行を事前に記録
+    # AIの手を先に打つ（AIは先攻 PLAYER1）
+    # ※ /api/move が呼ばれる時点では人間(PLAYER2)のターンのはずだが、
+    #   念のためターン確認はしない（UIが制御する）
+
+    # 人間の手（PLAYER2）
     human_row = env._apply_gravity(col)
     _, reward, done, info = env.step(col)
 

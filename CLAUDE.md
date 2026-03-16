@@ -45,7 +45,7 @@
 ├── ui/
 │   └── cli_ui.py               # CLI表示（現在はWebUIがメイン）
 ├── web/
-│   ├── app.py                  # Flask サーバー（weights があれば DQNAgent を自動ロード）
+│   ├── app.py                  # Flask サーバー（weights があれば DQNAgent を自動ロード、CPU先攻・プレイヤー後攻）
 │   └── templates/
 │       └── index.html          # ブラウザUI（アニメーション付き）
 ├── weights/
@@ -67,6 +67,9 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 ```
 - `weights/dqn_connect4.npz` があれば自動で DQNAgent を読み込む
 - なければ RandomAgent にフォールバック
+- **CPU（赤）が先攻（PLAYER1）、プレイヤー（橙）が後攻（PLAYER2）**
+  - DQNはPLAYER1（先攻固定）として学習しているため、UIをそれに合わせている
+  - ゲーム開始時にCPUが先に1手打ち、以降はプレイヤー → CPU の順でターンが回る
 
 ## 学習の実行（現行）
 ```bash

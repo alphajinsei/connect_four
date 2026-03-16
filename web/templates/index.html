@@ -165,11 +165,11 @@
 <div id="legend">
   <div class="legend-item">
     <div class="legend-dot p1"></div>
-    <span>あなた (赤)</span>
+    <span>CPU (赤・先攻)</span>
   </div>
   <div class="legend-item">
     <div class="legend-dot p2"></div>
-    <span>ランダムAI (橙)</span>
+    <span>あなた (橙・後攻)</span>
   </div>
 </div>
 
@@ -259,11 +259,24 @@
   }
 
   async function newGame() {
+    busy = true;
+    setArrows([], false);
     const res = await fetch('/api/new_game', { method: 'POST' });
-    gameState = await res.json();
-    renderBoard(gameState.board);
-    setArrows(gameState.valid_actions, true);
-    setStatus('あなたの番です（赤）');
+    const data = await res.json();
+    gameState = data;
+
+    // 盤面をまずリセット描画（空）してからAIの初手をアニメーション
+    renderBoard(Array.from({length: 6}, () => Array(7).fill(0)));
+    setStatus('CPUが先手を打ちました...');
+
+    // AIの初手アニメーション
+    if (data.ai_col !== null && data.ai_col !== undefined) {
+      await dropPiece(data.ai_row, data.ai_col, 'p1');
+    }
+    renderBoard(data.board);
+
+    setArrows(data.valid_actions, true);
+    setStatus('あなたの番です（橙）');
     busy = false;
   }
 
@@ -283,12 +296,12 @@
 
     gameState = data;
 
-    // 1. 人間の石をアニメーション（終了まで待つ）
-    await dropPiece(data.human_row, col, 'p1');
+    // 1. 人間の石をアニメーション（PLAYER2 = 橙）
+    await dropPiece(data.human_row, col, 'p2');
 
-    // 2. AIの石をアニメーション（存在する場合）
+    // 2. AIの石をアニメーション（PLAYER1 = 赤）
     if (data.ai_col !== null && data.ai_col !== undefined) {
-      await dropPiece(data.ai_row, data.ai_col, 'p2');
+      await dropPiece(data.ai_row, data.ai_col, 'p1');
     }
 
     // 3. 最終盤面を同期（念のため）
@@ -296,12 +309,12 @@
 
     if (data.done) {
       highlightWinner(data.board, data.winner);
-      if (data.winner === 1)       setStatus('あなたの勝ち！ 🎉');
-      else if (data.winner === -1) setStatus('AIの勝ち！ 😈');
+      if (data.winner === -1)      setStatus('あなたの勝ち！ 🎉');
+      else if (data.winner === 1)  setStatus('CPUの勝ち！ 😈');
       else                         setStatus('引き分け！');
     } else {
       setArrows(data.valid_actions, true);
-      setStatus('あなたの番です（赤）');
+      setStatus('あなたの番です（橙）');
     }
     busy = false;
   }

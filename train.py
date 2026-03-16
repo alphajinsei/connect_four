@@ -112,7 +112,7 @@ def print_header(phase, noise, target):
     print("-" * 82)
 
 
-def train(num_episodes=30000, eval_interval=500, load_path=None):
+def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1):
     os.makedirs("weights",     exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -137,7 +137,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None):
     reward_history = []
     best_vs_rb     = 0.0
 
-    phase_idx      = 0
+    phase_idx      = max(0, start_phase - 1)
     noise, target  = CURRICULUM[phase_idx]
     opp            = NoisyRuleBasedAgent(noise=noise)
     print_header(phase_idx + 1, noise, target)
@@ -189,10 +189,13 @@ if __name__ == "__main__":
     parser.add_argument("--eval-interval", type=int, default=500)
     parser.add_argument("--load-path",     type=str, default=None,
                         help="学習済み重みから再開 例: weights/dqn_connect4")
+    parser.add_argument("--start-phase",   type=int, default=1,
+                        help="開始フェーズ (1-4, デフォルト: 1)")
     args = parser.parse_args()
 
     train(
         num_episodes=args.episodes,
         eval_interval=args.eval_interval,
         load_path=args.load_path,
+        start_phase=args.start_phase,
     )
