@@ -110,17 +110,17 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
 
     # --- 対戦相手の初期化 ---
     if selfplay:
-        # Self-play: 最初は現在の重みをコピーして凍結した相手を作成
+        # Self-play プール方式:
+        # 初期スナップショットをプールに追加し、毎エピソード「ランダムAI or プール内スナップショット」をランダム選択
         snap_path = os.path.join(SNAPSHOTS_DIR, "selfplay_opponent_init")
         agent.save(snap_path)
-        selfplay_opponent = DQNAgent()
-        selfplay_opponent.load(snap_path + ".npz")
-        selfplay_opponent.epsilon = 0.05
-        random_opponent = RandomAgent()
-        opponent = selfplay_opponent  # 最初はself-play相手
-        opponent_label = "self(init)"
-        mix_info = f", ランダム混合率={random_mix:.0%}" if random_mix > 0 else ""
-        print(f"Self-play モード: {selfplay_update_interval}ep ごとに相手を更新{mix_info}")
+        init_opponent = DQNAgent()
+        init_opponent.load(snap_path + ".npz")
+        init_opponent.epsilon = 0.05
+        # snapshot_pool: (ラベル, agentオブジェクト) のリスト。ランダムAIも含む
+        snapshot_pool = [("random", RandomAgent()), ("self(init)", init_opponent)]
+        opponent_label = "pool(2)"
+        print(f"Self-play プール方式: {selfplay_update_interval}ep ごとにスナップショットをプールへ追加")
     elif opponent_path:
         opponent = DQNAgent()
         opponent.load(opponent_path + ".npz")
@@ -135,7 +135,7 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     if curriculum:
         print("カリキュラム学習モード: 勝率しきい値を超えると相手を自動更新")
 
-    runner = GameRunner(env, agent, selfplay_opponent if selfplay else opponent, renderer=None)
+    runner = GameRunner(env, agent, snapshot_pool[0][1] if selfplay else opponent, renderer=None)
 
     win_history    = []
     reward_history = []
@@ -154,10 +154,10 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     print_header()
 
     for episode in range(1, num_episodes + 1):
-        # 混合学習: random_mix の確率でランダムAIと対戦
-        if selfplay and random_mix > 0 and np.random.random() < random_mix:
-            tmp_runner = GameRunner(env, agent, random_opponent, renderer=None)
-            stats = tmp_runner.run_episode()
+        if selfplay:
+            # プールからランダムに相手を選んで対戦
+            _, pool_opponent = snapshot_pool[np.random.randint(len(snapshot_pool))]
+            stats = GameRunner(env, agent, pool_opponent, renderer=None).run_episode()
         else:
             stats = runner.run_episode()
         win_history.append(1 if stats["winner"] == Connect4Env.PLAYER1 else 0)
@@ -171,15 +171,18 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
             vs_rand_str = f"{vs_rand:>9.1f}%" if vs_rand is not None else f"{'---':>10}"
             print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rand_str}")
 
-            # Self-play: 一定間隔で相手を現在の重みで更新
+            # Self-play: 一定間隔で現在の重みをスナップショットとしてプールに追加
             if selfplay and episode % selfplay_update_interval == 0:
                 selfplay_update_count += 1
                 snap_path = os.path.join(SNAPSHOTS_DIR, f"selfplay_{selfplay_update_count:03d}_ep{episode}")
                 agent.save(snap_path)
-                selfplay_opponent.load(snap_path + ".npz")
-                selfplay_opponent.epsilon = 0.05
-                opponent_label = f"self({selfplay_update_count:03d})"
-                print(f"  [Self-play] 相手を更新: ep{episode} スナップショット → {opponent_label}")
+                new_opponent = DQNAgent()
+                new_opponent.load(snap_path + ".npz")
+                new_opponent.epsilon = 0.05
+                label = f"self({selfplay_update_count:03d})"
+                snapshot_pool.append((label, new_opponent))
+                opponent_label = f"pool({len(snapshot_pool)})"
+                print(f"  [Self-play] プールに追加: ep{episode} → {label}  合計{len(snapshot_pool)}体")
 
             # カリキュラム学習: しきい値を超えたら相手を更新
             if curriculum and curriculum_phase < len(CURRICULUM_PHASES):
