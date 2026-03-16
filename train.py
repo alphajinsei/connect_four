@@ -49,6 +49,7 @@ class Tee:
 from env.connect4_env import Connect4Env
 from agents.dqn_agent import DQNAgent
 from agents.random_agent import RandomAgent
+from agents.rule_based_agent import RuleBasedAgent
 from game_runner import GameRunner
 
 WEIGHTS_PATH    = "weights/dqn_connect4"
@@ -72,10 +73,9 @@ def make_agent(**kwargs):
     return DQNAgent(**defaults)
 
 
-def eval_vs_random(agent, env, n=100):
-    """ランダムAIと n 戦して勝率を返す（学習なし・greedyプレイ）"""
-    random_agent = RandomAgent()
-    runner = GameRunner(env, agent, random_agent, renderer=None)
+def eval_vs(agent, env, opponent, n=100):
+    """opponent と n 戦して勝率を返す（学習なし・greedyプレイ）"""
+    runner = GameRunner(env, agent, opponent, renderer=None)
     saved_eps = agent.epsilon
     agent.epsilon = 0.0  # greedy
     wins = sum(
@@ -86,9 +86,17 @@ def eval_vs_random(agent, env, n=100):
     return wins / n * 100
 
 
+def eval_vs_random(agent, env, n=100):
+    return eval_vs(agent, env, RandomAgent(), n)
+
+
+def eval_vs_rulebased(agent, env, n=100):
+    return eval_vs(agent, env, RuleBasedAgent(), n)
+
+
 def print_header():
-    print(f"{'Episode':>8} | {'相手':>18} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Random':>10}")
-    print("-" * 82)
+    print(f"{'Episode':>8} | {'相手':>18} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Random':>10} | {'vs RuleBased':>13}")
+    print("-" * 98)
 
 
 def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False,
@@ -111,22 +119,33 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     # --- 対戦相手の初期化 ---
     if selfplay:
         # Self-play プール方式:
-        # 初期スナップショットをプールに追加し、毎エピソード「ランダムAI or プール内スナップショット」をランダム選択
+        # 初期スナップショットをプールに追加し、毎エピソードプールからランダム選択
         snap_path = os.path.join(SNAPSHOTS_DIR, "selfplay_opponent_init")
         agent.save(snap_path)
         init_opponent = DQNAgent()
         init_opponent.load(snap_path + ".npz")
         init_opponent.epsilon = 0.05
-        # snapshot_pool: (ラベル, agentオブジェクト) のリスト。ランダムAIも含む
-        snapshot_pool = [("random", RandomAgent()), ("self(init)", init_opponent)]
-        opponent_label = "pool(2)"
+        # snapshot_pool: (ラベル, agentオブジェクト) のリスト
+        # ランダムAI + ルールベースAI + 初期スナップショットをベースに
+        snapshot_pool = [
+            ("random",    RandomAgent()),
+            ("rulebased", RuleBasedAgent()),
+            ("self(init)", init_opponent),
+        ]
+        opponent_label = f"pool({len(snapshot_pool)})"
         print(f"Self-play プール方式: {selfplay_update_interval}ep ごとにスナップショットをプールへ追加")
+        print(f"  初期プール: random, rulebased, self(init) の3体")
     elif opponent_path:
-        opponent = DQNAgent()
-        opponent.load(opponent_path + ".npz")
-        opponent.epsilon = 0.0  # 推論のみ（探索なし）
-        opponent_label = os.path.basename(opponent_path)
-        print(f"対戦相手: DQN ({opponent_label})")
+        if opponent_path == "rulebased":
+            opponent = RuleBasedAgent()
+            opponent_label = "rulebased"
+            print(f"対戦相手: ルールベースAI")
+        else:
+            opponent = DQNAgent()
+            opponent.load(opponent_path + ".npz")
+            opponent.epsilon = 0.0
+            opponent_label = os.path.basename(opponent_path)
+            print(f"対戦相手: DQN ({opponent_label})")
     else:
         opponent = RandomAgent()
         opponent_label = "random"
@@ -167,9 +186,11 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
             recent     = win_history[-500:]
             win_rate   = np.mean(recent) * 100
             avg_reward = np.mean(reward_history[-500:])
-            vs_rand    = eval_vs_random(agent, env) if selfplay else None
+            vs_rand = eval_vs_random(agent, env) if selfplay else None
+            vs_rb   = eval_vs_rulebased(agent, env) if selfplay else None
             vs_rand_str = f"{vs_rand:>9.1f}%" if vs_rand is not None else f"{'---':>10}"
-            print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rand_str}")
+            vs_rb_str   = f"{vs_rb:>12.1f}%" if vs_rb   is not None else f"{'---':>13}"
+            print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rand_str} | {vs_rb_str}")
 
             # Self-play: 一定間隔で現在の重みをスナップショットとしてプールに追加
             if selfplay and episode % selfplay_update_interval == 0:
