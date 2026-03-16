@@ -53,41 +53,83 @@ class Connect4Env:
             self.winner = 0  # draw
             return self.get_state(), 0.0, True, {"winner": 0, "invalid_move": False}
 
-        # 中間報酬: 直前に置いたマスを起点に連数をカウントしてシェーピング
+        # 中間報酬: 攻防セットのシェーピング
         shaping = self._shaping_reward(self.current_player, row, col)
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
         return self.get_state(), shaping, False, {"winner": None, "invalid_move": False}
 
     def _shaping_reward(self, player, row, col):
-        """直前に置いた (row, col) を起点に連数を数えてPLAYER1視点の報酬を返す。"""
+        """
+        置いた (row, col) を起点に攻防セットの中間報酬を返す（PLAYER1 視点）。
+
+        報酬設計:
+          自分の3連を作った    : +0.30
+          自分の2連を作った    : +0.10
+          相手の3連を防いだ    : +0.50
+          相手の2連を防いだ    : +0.10
+          相手の勝ち手を見逃した: -0.80（次に相手が勝てる手がある場合）
+        """
         b = self.board
+        opponent = self.PLAYER2 if player == self.PLAYER1 else self.PLAYER1
         sign = 1 if player == self.PLAYER1 else -1
 
-        def count_line(dr, dc):
-            """(dr,dc) 方向と逆方向の連続コマ数（自分のコマのみ）を返す"""
+        def count_line(r0, c0, dr, dc, target):
+            """(r0,c0) から両方向に連続する target のコマ数を返す（r0,c0 自身は含まない）"""
             n = 0
             for d in (1, -1):
-                r, c = row + dr * d, col + dc * d
-                while 0 <= r < self.ROWS and 0 <= c < self.COLS and b[r][c] == player:
+                r, c = r0 + dr * d, c0 + dc * d
+                while 0 <= r < self.ROWS and 0 <= c < self.COLS and b[r][c] == target:
                     n += 1
                     r += dr * d
                     c += dc * d
-            return n  # 置いたコマ自身は含まない
+            return n
 
-        max_line = max(
-            count_line(0, 1),   # 横
-            count_line(1, 0),   # 縦
-            count_line(1, 1),   # 斜め右下
-            count_line(1, -1),  # 斜め左下
-        )
-        # 2連=0.05、3連=0.1（4連は勝利なのでここには来ない）
-        if max_line >= 3:
-            reward = 0.1
-        elif max_line >= 2:
-            reward = 0.05
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+
+        # 自分の連（置いた直後の自分コマ起点）
+        my_max = max(count_line(row, col, dr, dc, player) for dr, dc in directions)
+
+        # 相手の連（置く前に相手が作っていた連を防いだか）
+        # 置いたマスを一時的に空にして、相手視点の連を計る
+        b[row][col] = self.EMPTY
+        opp_max = max(count_line(row, col, dr, dc, opponent) for dr, dc in directions)
+        b[row][col] = player  # 元に戻す
+
+        # 攻撃報酬
+        if my_max >= 3:
+            attack = 0.30
+        elif my_max >= 2:
+            attack = 0.10
         else:
-            reward = 0.0
-        return sign * reward
+            attack = 0.0
+
+        # 防御報酬（相手の連を遮断した）
+        if opp_max >= 3:
+            defense = 0.50
+        elif opp_max >= 2:
+            defense = 0.10
+        else:
+            defense = 0.0
+
+        # 防御失敗ペナルティ: 次のターンで相手が勝てる手があるか確認
+        miss_penalty = 0.0
+        for c in range(self.COLS):
+            top = None
+            for r in range(self.ROWS - 1, -1, -1):
+                if b[r][c] == self.EMPTY:
+                    top = r
+                    break
+            if top is None:
+                continue
+            b[top][c] = opponent
+            if self._check_win(opponent):
+                miss_penalty = -0.80
+            b[top][c] = self.EMPTY
+            if miss_penalty != 0.0:
+                break
+
+        shaping = attack + defense + miss_penalty
+        return sign * shaping
 
     def get_state(self, perspective=None):
         """
