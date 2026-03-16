@@ -1,21 +1,18 @@
 """
-train.py — DQN エージェントの学習スクリプト
+train.py — DQN エージェントの学習スクリプト（再設計版）
+
+設計方針:
+  - DQN は常に PLAYER1（先手）として学習
+  - 対戦相手はルールベースAI（勝ち手・負け手阻止・中央優先）
+  - eval毎に vs RuleBased の勝率を表示（絶対的な強さの指標）
+  - 将来的に --selfplay でプール方式に移行できる拡張口を残す
 
 使い方:
-    # ステージ1: ランダム相手で学習
-    python train.py
+    # 基本: ルールベースAI相手にゼロから学習
+    python train.py --episodes 20000
 
-    # ステージ2: カリキュラム学習（自動で相手を更新）
-    python train.py --curriculum
-
-    # ステージ3: Self-play（カリキュラム学習済み重みから開始）
-    python train.py --selfplay --load-path weights/dqn_connect4 --episodes 20000
-
-    # ステージ3改: 混合学習（Self-play + ランダムAI混合で忘却を防ぐ）
-    python train.py --selfplay --load-path weights/snapshots/snapshot_03_ep3000 --episodes 20000 --random-mix 0.3
-
-    # 特定の重みを対戦相手にして学習（手動カリキュラム）
-    python train.py --opponent-path weights/snapshot_ep5000
+    # 学習済み重みから続き
+    python train.py --load-path weights/dqn_connect4 --episodes 20000
 
     # エピソード数・評価間隔を指定
     python train.py --episodes 20000 --eval-interval 500
@@ -23,16 +20,24 @@ train.py — DQN エージェントの学習スクリプト
 import sys
 import os
 import argparse
-import shutil
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+from env.connect4_env import Connect4Env
+from agents.dqn_agent import DQNAgent
+from agents.rule_based_agent import RuleBasedAgent
+from game_runner import GameRunner
+
+WEIGHTS_PATH  = "weights/dqn_connect4"
+SNAPSHOTS_DIR = "weights/snapshots"
+LOG_PATH      = "weights/train_log.txt"
 
 
 class Tee:
     """stdout とファイルに同時に書き出す"""
     def __init__(self, path):
-        self._file = open(path, "w", encoding="utf-8", buffering=1)
+        self._file   = open(path, "w", encoding="utf-8", buffering=1)
         self._stdout = sys.stdout
 
     def write(self, data):
@@ -46,16 +51,6 @@ class Tee:
     def close(self):
         self._file.close()
 
-from env.connect4_env import Connect4Env
-from agents.dqn_agent import DQNAgent
-from agents.random_agent import RandomAgent
-from agents.rule_based_agent import RuleBasedAgent
-from game_runner import GameRunner
-
-WEIGHTS_PATH    = "weights/dqn_connect4"
-SNAPSHOTS_DIR   = "weights/snapshots"
-LOG_PATH        = "weights/train_log.txt"
-
 
 def make_agent(**kwargs):
     defaults = dict(
@@ -63,7 +58,7 @@ def make_agent(**kwargs):
         gamma=0.99,
         epsilon_start=1.0,
         epsilon_end=0.05,
-        epsilon_decay=0.99990,   # ~30000ステップ(≒3750ep)でε=0.05に到達
+        epsilon_decay=0.99990,       # ~30000ステップ(≒3750ep)でε=0.05に到達
         buffer_capacity=50000,
         batch_size=128,
         warmup_steps=2000,
@@ -73,11 +68,11 @@ def make_agent(**kwargs):
     return DQNAgent(**defaults)
 
 
-def eval_vs(agent, env, opponent, n=100):
-    """opponent と n 戦して勝率を返す（学習なし・greedyプレイ）"""
-    runner = GameRunner(env, agent, opponent, renderer=None)
-    saved_eps = agent.epsilon
-    agent.epsilon = 0.0  # greedy
+def eval_vs_rulebased(agent, env, n=200):
+    """ルールベースAI と n 戦して勝率を返す（greedy、学習なし）"""
+    runner     = GameRunner(env, agent, RuleBasedAgent(), renderer=None)
+    saved_eps  = agent.epsilon
+    agent.epsilon = 0.0
     wins = sum(
         1 for _ in range(n)
         if runner.run_episode()["winner"] == Connect4Env.PLAYER1
@@ -86,193 +81,85 @@ def eval_vs(agent, env, opponent, n=100):
     return wins / n * 100
 
 
-def eval_vs_random(agent, env, n=100):
-    return eval_vs(agent, env, RandomAgent(), n)
-
-
-def eval_vs_rulebased(agent, env, n=100):
-    return eval_vs(agent, env, RuleBasedAgent(), n)
-
-
 def print_header():
-    print(f"{'Episode':>8} | {'相手':>18} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Random':>10} | {'vs RuleBased':>13}")
-    print("-" * 98)
+    print(f"{'Episode':>8} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs RuleBased(200戦)':>20}")
+    print("-" * 72)
 
 
-def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False,
-          selfplay=False, load_path=None, selfplay_update_interval=500, random_mix=0.0):
-    os.makedirs("weights", exist_ok=True)
-    os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
+def train(num_episodes=20000, eval_interval=500, load_path=None):
+    os.makedirs("weights",      exist_ok=True)
+    os.makedirs(SNAPSHOTS_DIR,  exist_ok=True)
 
-    tee = Tee(LOG_PATH)
+    tee        = Tee(LOG_PATH)
     sys.stdout = tee
 
     env   = Connect4Env()
 
     if load_path:
-        agent = make_agent(epsilon_start=0.10)  # 学習済みから再開: 探索は少なめ
+        agent = make_agent(epsilon_start=0.10)
         agent.load(load_path + ".npz")
         print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
     else:
         agent = make_agent()
+        print("新規学習開始")
 
-    # --- 対戦相手の初期化 ---
-    if selfplay:
-        # Self-play プール方式:
-        # 初期スナップショットをプールに追加し、毎エピソードプールからランダム選択
-        snap_path = os.path.join(SNAPSHOTS_DIR, "selfplay_opponent_init")
-        agent.save(snap_path)
-        init_opponent = DQNAgent()
-        init_opponent.load(snap_path + ".npz")
-        init_opponent.epsilon = 0.05
-        # snapshot_pool: (ラベル, agentオブジェクト) のリスト
-        # ランダムAI + ルールベースAI + 初期スナップショットをベースに
-        snapshot_pool = [
-            ("random",    RandomAgent()),
-            ("rulebased", RuleBasedAgent()),
-            ("self(init)", init_opponent),
-        ]
-        opponent_label = f"pool({len(snapshot_pool)})"
-        print(f"Self-play プール方式: {selfplay_update_interval}ep ごとにスナップショットをプールへ追加")
-        print(f"  初期プール: random, rulebased, self(init) の3体")
-    elif opponent_path:
-        if opponent_path == "rulebased":
-            opponent = RuleBasedAgent()
-            opponent_label = "rulebased"
-            print(f"対戦相手: ルールベースAI")
-        else:
-            opponent = DQNAgent()
-            opponent.load(opponent_path + ".npz")
-            opponent.epsilon = 0.0
-            opponent_label = os.path.basename(opponent_path)
-            print(f"対戦相手: DQN ({opponent_label})")
-    else:
-        opponent = RandomAgent()
-        opponent_label = "random"
-        print(f"対戦相手: ランダムAI")
+    opponent = RuleBasedAgent()
+    print("対戦相手: ルールベースAI（先手固定で学習）")
+    print()
 
-    if curriculum:
-        print("カリキュラム学習モード: 勝率しきい値を超えると相手を自動更新")
-
-    runner = GameRunner(env, agent, snapshot_pool[0][1] if selfplay else opponent, renderer=None)
+    runner = GameRunner(env, agent, opponent, renderer=None)
 
     win_history    = []
     reward_history = []
-    snapshot_count = 0
-    selfplay_update_count = 0
-
-    # カリキュラム学習のフェーズ設定
-    # (しきい値, 次フェーズの説明文)
-    CURRICULUM_PHASES = [
-        (0.65, "vs ランダム → 勝率65%達成"),
-        (0.60, "vs 弱いDQN(snapshot) → 勝率60%達成"),
-        (0.60, "vs 中程度のDQN(snapshot) → 勝率60%達成"),
-    ]
-    curriculum_phase = 0  # 0=vs random, 1以降=vs snapshot
+    best_vs_rb     = 0.0
 
     print_header()
 
     for episode in range(1, num_episodes + 1):
-        if selfplay:
-            # プールからランダムに相手を選んで対戦
-            _, pool_opponent = snapshot_pool[np.random.randint(len(snapshot_pool))]
-            stats = GameRunner(env, agent, pool_opponent, renderer=None).run_episode()
-        else:
-            stats = runner.run_episode()
+        stats = runner.run_episode()
         win_history.append(1 if stats["winner"] == Connect4Env.PLAYER1 else 0)
         reward_history.append(stats["reward_p1"])
 
         if episode % eval_interval == 0:
-            recent     = win_history[-500:]
-            win_rate   = np.mean(recent) * 100
+            win_rate   = np.mean(win_history[-500:])  * 100
             avg_reward = np.mean(reward_history[-500:])
-            vs_rand = eval_vs_random(agent, env) if selfplay else None
-            vs_rb   = eval_vs_rulebased(agent, env) if selfplay else None
-            vs_rand_str = f"{vs_rand:>9.1f}%" if vs_rand is not None else f"{'---':>10}"
-            vs_rb_str   = f"{vs_rb:>12.1f}%" if vs_rb   is not None else f"{'---':>13}"
-            print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rand_str} | {vs_rb_str}")
+            vs_rb      = eval_vs_rulebased(agent, env)
 
-            # Self-play: 一定間隔で現在の重みをスナップショットとしてプールに追加
-            if selfplay and episode % selfplay_update_interval == 0:
-                selfplay_update_count += 1
-                snap_path = os.path.join(SNAPSHOTS_DIR, f"selfplay_{selfplay_update_count:03d}_ep{episode}")
+            print(f"{episode:>8} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rb:>19.1f}%")
+
+            # 自己ベスト更新時にスナップショット保存
+            if vs_rb > best_vs_rb:
+                best_vs_rb = vs_rb
+                snap_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct")
                 agent.save(snap_path)
-                new_opponent = DQNAgent()
-                new_opponent.load(snap_path + ".npz")
-                new_opponent.epsilon = 0.05
-                label = f"self({selfplay_update_count:03d})"
-                snapshot_pool.append((label, new_opponent))
-                opponent_label = f"pool({len(snapshot_pool)})"
-                print(f"  [Self-play] プールに追加: ep{episode} → {label}  合計{len(snapshot_pool)}体")
-
-            # カリキュラム学習: しきい値を超えたら相手を更新
-            if curriculum and curriculum_phase < len(CURRICULUM_PHASES):
-                threshold, phase_desc = CURRICULUM_PHASES[curriculum_phase]
-                if win_rate / 100 >= threshold:
-                    snapshot_count += 1
-                    snap_path = os.path.join(SNAPSHOTS_DIR, f"snapshot_{snapshot_count:02d}_ep{episode}")
-                    agent.save(snap_path)
-                    print(f"\n  [OK] {phase_desc}")
-                    print(f"  スナップショット保存: {snap_path}.npz")
-
-                    curriculum_phase += 1
-
-                    if curriculum_phase < len(CURRICULUM_PHASES):
-                        # 新しい対戦相手: 今保存したスナップショット
-                        new_opponent = DQNAgent()
-                        new_opponent.load(snap_path + ".npz")
-                        new_opponent.epsilon = 0.05  # 少しランダム性を残す
-                        opponent       = new_opponent
-                        opponent_label = f"snap{snapshot_count:02d}"
-                        runner         = GameRunner(env, agent, opponent, renderer=None)
-                        print(f"  対戦相手を更新: {opponent_label}\n")
-                        print_header()
-                    else:
-                        print("  全フェーズ完了！\n")
+                print(f"  [Best] vs RuleBased {vs_rb:.1f}% → スナップショット保存: {snap_path}.npz")
 
     print("\n学習完了")
     agent.save(WEIGHTS_PATH)
     print(f"重みを保存しました: {WEIGHTS_PATH}.npz")
 
-    # 勝率推移
     print("\n=== 勝率推移（直近500エピソード平均）===")
     window = 500
     for i in range(window, len(win_history) + 1, window):
         wr  = np.mean(win_history[i-window:i]) * 100
-        bar = '#' * int(wr / 2)
+        bar = "#" * int(wr / 2)
         print(f"Ep {i:>6}: {bar:<50} {wr:.1f}%")
 
     sys.stdout = tee._stdout
     tee.close()
-
     return agent
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes",                type=int,  default=10000)
-    parser.add_argument("--eval-interval",           type=int,  default=500)
-    parser.add_argument("--opponent-path",           type=str,  default=None,
-                        help="対戦相手のDQN重みパス（.npz不要）例: weights/snapshots/snapshot_01_ep5000")
-    parser.add_argument("--curriculum",              action="store_true",
-                        help="カリキュラム学習モード（勝率しきい値で相手を自動更新）")
-    parser.add_argument("--selfplay",                action="store_true",
-                        help="Self-playモード（一定間隔で相手を自分のスナップショットに更新）")
-    parser.add_argument("--load-path",               type=str,  default=None,
-                        help="学習済み重みをロードして続きから開始 例: weights/dqn_connect4")
-    parser.add_argument("--selfplay-update-interval", type=int,   default=500,
-                        help="Self-playで相手を更新する間隔（エピソード数）")
-    parser.add_argument("--random-mix",               type=float, default=0.0,
-                        help="Self-play中にランダムAIと対戦する割合 (0.0〜1.0)。忘却防止用")
+    parser.add_argument("--episodes",      type=int, default=20000)
+    parser.add_argument("--eval-interval", type=int, default=500)
+    parser.add_argument("--load-path",     type=str, default=None,
+                        help="学習済み重みから再開 例: weights/dqn_connect4")
     args = parser.parse_args()
 
     train(
         num_episodes=args.episodes,
         eval_interval=args.eval_interval,
-        opponent_path=args.opponent_path,
-        curriculum=args.curriculum,
-        selfplay=args.selfplay,
         load_path=args.load_path,
-        selfplay_update_interval=args.selfplay_update_interval,
-        random_mix=args.random_mix,
     )
