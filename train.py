@@ -11,6 +11,9 @@ train.py — DQN エージェントの学習スクリプト
     # ステージ3: Self-play（カリキュラム学習済み重みから開始）
     python train.py --selfplay --load-path weights/dqn_connect4 --episodes 20000
 
+    # ステージ3改: 混合学習（Self-play + ランダムAI混合で忘却を防ぐ）
+    python train.py --selfplay --load-path weights/snapshots/snapshot_03_ep3000 --episodes 20000 --random-mix 0.3
+
     # 特定の重みを対戦相手にして学習（手動カリキュラム）
     python train.py --opponent-path weights/snapshot_ep5000
 
@@ -54,7 +57,7 @@ LOG_PATH        = "weights/train_log.txt"
 
 
 def make_agent(**kwargs):
-    return DQNAgent(
+    defaults = dict(
         lr=1e-3,
         gamma=0.99,
         epsilon_start=1.0,
@@ -64,17 +67,32 @@ def make_agent(**kwargs):
         batch_size=128,
         warmup_steps=2000,
         target_update_interval=200,
-        **kwargs,
     )
+    defaults.update(kwargs)
+    return DQNAgent(**defaults)
+
+
+def eval_vs_random(agent, env, n=100):
+    """ランダムAIと n 戦して勝率を返す（学習なし・greedyプレイ）"""
+    random_agent = RandomAgent()
+    runner = GameRunner(env, agent, random_agent, renderer=None)
+    saved_eps = agent.epsilon
+    agent.epsilon = 0.0  # greedy
+    wins = sum(
+        1 for _ in range(n)
+        if runner.run_episode()["winner"] == Connect4Env.PLAYER1
+    )
+    agent.epsilon = saved_eps
+    return wins / n * 100
 
 
 def print_header():
-    print(f"{'Episode':>8} | {'相手':>18} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7}")
-    print("-" * 70)
+    print(f"{'Episode':>8} | {'相手':>18} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Random':>10}")
+    print("-" * 82)
 
 
 def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=False,
-          selfplay=False, load_path=None, selfplay_update_interval=500):
+          selfplay=False, load_path=None, selfplay_update_interval=500, random_mix=0.0):
     os.makedirs("weights", exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -95,11 +113,14 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
         # Self-play: 最初は現在の重みをコピーして凍結した相手を作成
         snap_path = os.path.join(SNAPSHOTS_DIR, "selfplay_opponent_init")
         agent.save(snap_path)
-        opponent = DQNAgent()
-        opponent.load(snap_path + ".npz")
-        opponent.epsilon = 0.05
+        selfplay_opponent = DQNAgent()
+        selfplay_opponent.load(snap_path + ".npz")
+        selfplay_opponent.epsilon = 0.05
+        random_opponent = RandomAgent()
+        opponent = selfplay_opponent  # 最初はself-play相手
         opponent_label = "self(init)"
-        print(f"Self-play モード: {selfplay_update_interval}ep ごとに相手を更新")
+        mix_info = f", ランダム混合率={random_mix:.0%}" if random_mix > 0 else ""
+        print(f"Self-play モード: {selfplay_update_interval}ep ごとに相手を更新{mix_info}")
     elif opponent_path:
         opponent = DQNAgent()
         opponent.load(opponent_path + ".npz")
@@ -114,7 +135,7 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     if curriculum:
         print("カリキュラム学習モード: 勝率しきい値を超えると相手を自動更新")
 
-    runner = GameRunner(env, agent, opponent, renderer=None)
+    runner = GameRunner(env, agent, selfplay_opponent if selfplay else opponent, renderer=None)
 
     win_history    = []
     reward_history = []
@@ -133,7 +154,12 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
     print_header()
 
     for episode in range(1, num_episodes + 1):
-        stats = runner.run_episode()
+        # 混合学習: random_mix の確率でランダムAIと対戦
+        if selfplay and random_mix > 0 and np.random.random() < random_mix:
+            tmp_runner = GameRunner(env, agent, random_opponent, renderer=None)
+            stats = tmp_runner.run_episode()
+        else:
+            stats = runner.run_episode()
         win_history.append(1 if stats["winner"] == Connect4Env.PLAYER1 else 0)
         reward_history.append(stats["reward_p1"])
 
@@ -141,15 +167,17 @@ def train(num_episodes=10000, eval_interval=500, opponent_path=None, curriculum=
             recent     = win_history[-500:]
             win_rate   = np.mean(recent) * 100
             avg_reward = np.mean(reward_history[-500:])
-            print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f}")
+            vs_rand    = eval_vs_random(agent, env) if selfplay else None
+            vs_rand_str = f"{vs_rand:>9.1f}%" if vs_rand is not None else f"{'---':>10}"
+            print(f"{episode:>8} | {opponent_label:>18} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rand_str}")
 
             # Self-play: 一定間隔で相手を現在の重みで更新
             if selfplay and episode % selfplay_update_interval == 0:
                 selfplay_update_count += 1
                 snap_path = os.path.join(SNAPSHOTS_DIR, f"selfplay_{selfplay_update_count:03d}_ep{episode}")
                 agent.save(snap_path)
-                opponent.load(snap_path + ".npz")
-                opponent.epsilon = 0.05
+                selfplay_opponent.load(snap_path + ".npz")
+                selfplay_opponent.epsilon = 0.05
                 opponent_label = f"self({selfplay_update_count:03d})"
                 print(f"  [Self-play] 相手を更新: ep{episode} スナップショット → {opponent_label}")
 
@@ -208,8 +236,10 @@ if __name__ == "__main__":
                         help="Self-playモード（一定間隔で相手を自分のスナップショットに更新）")
     parser.add_argument("--load-path",               type=str,  default=None,
                         help="学習済み重みをロードして続きから開始 例: weights/dqn_connect4")
-    parser.add_argument("--selfplay-update-interval", type=int, default=500,
+    parser.add_argument("--selfplay-update-interval", type=int,   default=500,
                         help="Self-playで相手を更新する間隔（エピソード数）")
+    parser.add_argument("--random-mix",               type=float, default=0.0,
+                        help="Self-play中にランダムAIと対戦する割合 (0.0〜1.0)。忘却防止用")
     args = parser.parse_args()
 
     train(
@@ -220,4 +250,5 @@ if __name__ == "__main__":
         selfplay=args.selfplay,
         load_path=args.load_path,
         selfplay_update_interval=args.selfplay_update_interval,
+        random_mix=args.random_mix,
     )
