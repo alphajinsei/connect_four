@@ -7,7 +7,7 @@
 段階的に以下の順で進める：
 1. **相手を固定**（ランダムエージェント） ← 完了（勝率 ~79% 達成）
 2. **カリキュラム学習**（段階的に強い相手と対戦） ← 完了（全3フェーズ通過）
-3. **Self-play**（自分自身と対戦して強化） ← 次のステップ
+3. **Self-play + 混合学習**（自分自身と対戦しながらランダムAIも混ぜて忘却防止） ← 実装・検証完了、本学習実行中
 
 ## 実行環境
 - Python仮想環境: `.venv/`（プロジェクトルートに配置）
@@ -61,6 +61,9 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 # ステージ2: カリキュラム学習
 .venv\Scripts\python train.py --curriculum --episodes 15000
 
+# ステージ3: Self-play + 混合学習（推奨コマンド）
+.venv\Scripts\python train.py --selfplay --load-path weights/snapshots/snapshot_03_ep3000 --episodes 20000 --random-mix 0.5
+
 # 手動で特定スナップショットを相手に指定
 .venv\Scripts\python train.py --opponent-path weights/snapshots/snapshot_01_ep2000
 
@@ -69,6 +72,7 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 ```
 - 完了後 `weights/dqn_connect4.npz` に保存される
 - 学習ログは `weights/train_log.txt` にリアルタイム書き出しされる
+- Self-play中は `vs Random` 列でランダムAIへの絶対的な強さも確認できる
 
 ## 設計の重要ポイント
 
@@ -155,17 +159,48 @@ Phase 3: vs snap02 (ep2500時点の自分)
 - ステージ1（vs ランダム固定）と全く同じパターン
 - **根本解決策: Self-play**（相手=自分自身なので常に同レベルの相手と戦い続ける）
 
-## これからの展望
+## ステージ3の実装と知見（2026-03-16）
 
-### ステージ3: Self-play（次のステップ）
-`GameRunner(env, dqn_agent, dqn_agent)` の構成で実現可能（設計済み）。
+### Self-play実装（train.py）
+- `--selfplay`: 一定間隔（`--selfplay-update-interval`、デフォルト500ep）で相手を現在の重みで更新
+- `--load-path`: カリキュラム学習済み重みから再開（ε=0.10でリスタート）
+- `--random-mix`: Self-play中にランダムAIとも対戦する割合（忘却防止）
+- `eval_vs_random()`: eval毎にランダムAI100戦で絶対的な強さを測定し表示
 
-**実装方針:**
-- 同一の DQNAgent インスタンスを PLAYER1・PLAYER2 両方に渡す
-- 一定間隔（例: 500ep）で自分のスナップショットを保存し、相手側を更新する
-  （完全な同一インスタンスだと学習が不安定になる可能性があるため）
-- あるいは相手側は完全固定にして、一定ep後に手動で更新するシンプルな実装から始める
+### 検証で判明した課題：「Self-playによる忘却」
+純粋なSelf-playだけでは vs Random 勝率が急落する：
 
-**期待される効果:**
-- 相手が常に「今の自分」なので、特定パターンへの過学習が起きにくい
-- 強くなるにつれて相手も強くなるため、学習が継続しやすい
+```
+純Self-play（500ep更新）:
+  ep500:  vs Random 77%  ← カリキュラム直後は高い
+  ep1000: vs Random 66%  ↓ Self-playで最適化が偏る
+  ep3000: vs Random 44%  ← 完全に崩壊
+```
+
+**原因**: Self-playで「対DQN戦略」に特化するにつれ、ランダムAIの不規則な動きへの対処（カリキュラム学習で習得）が失われる（破滅的忘却）
+
+### 解決策：混合学習（random-mix）
+各エピソードで `random-mix` の確率でランダムAIと対戦させることで忘却を防ぐ：
+
+```
+random-mix 0.0（純Self-play）: vs Random が 44% まで崩壊
+random-mix 0.3:                vs Random が 60〜66% で推移
+random-mix 0.5（採用）:        vs Random が 70〜74% で安定
+```
+
+**現在の本学習設定:**
+```bash
+.venv\Scripts\python train.py \
+  --selfplay \
+  --load-path weights/snapshots/snapshot_03_ep3000 \
+  --episodes 20000 \
+  --selfplay-update-interval 500 \
+  --random-mix 0.5
+```
+
+### ステージ3のハイパーパラメータ追加
+| パラメータ | 値 | 備考 |
+|---|---|---|
+| `--selfplay-update-interval` | 500 | 相手を更新する間隔（ep） |
+| `--random-mix` | 0.5 | ランダムAI対戦の混合率（忘却防止） |
+| `--load-path`時のε | 0.10 | 再開時は探索を少し残す |

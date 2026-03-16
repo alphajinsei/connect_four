@@ -8,7 +8,7 @@ PyTorchなどの深層学習フレームワークを使わず、**NumPyだけで
 
 - **目的**: 強化学習の基礎（DQN）を、Connect Fourで手を動かしながら学ぶ
 - **実装**: PyTorchなし、NumPyのみで手書きニューラルネット
-- **進捗**: ステージ1・2完了、ステージ3（Self-play）へ
+- **進捗**: ステージ1・2・3（Self-play）実装完了、本学習実行中
 
 ## 学習ロードマップ
 
@@ -16,7 +16,7 @@ PyTorchなどの深層学習フレームワークを使わず、**NumPyだけで
 |---------|------|------|
 | 1 | vs ランダムAI（探索的学習の基礎） | 完了（勝率 ~79%） |
 | 2 | カリキュラム学習（段階的に強い相手） | 完了（全3フェーズ通過） |
-| 3 | Self-play（自分自身と対戦して強化） | 進行中 |
+| 3 | Self-play + 混合学習（忘却防止） | 実装完了・本学習中 |
 
 ## セットアップ
 
@@ -39,8 +39,8 @@ python -m venv .venv
 # ステージ2: カリキュラム学習（自動フェーズ移行）
 .venv\Scripts\python train.py --curriculum --episodes 15000
 
-# ステージ3: Self-play（実装予定）
-.venv\Scripts\python train.py --self-play --episodes 20000
+# ステージ3: Self-play + 混合学習（推奨）
+.venv\Scripts\python train.py --selfplay --load-path weights/snapshots/snapshot_03_ep3000 --episodes 20000 --random-mix 0.5
 ```
 
 完了後、`weights/dqn_connect4.npz` に重みが保存されます。学習ログは `weights/train_log.txt` にリアルタイム出力されます。
@@ -237,14 +237,22 @@ Phase 3 (vs 中程度DQN):
 ```
 
 **判明した課題**: フェーズ完了後も相手が固定されるため、ε収束後に再び過学習が始まる。
-**解決策**: Self-play（相手=自分自身で常に同レベルの相手と戦い続ける）
+**解決策**: Self-play + 混合学習
 
----
+### ステージ3: Self-play + 混合学習
 
-## 今後の方針
+500epごとに自分のスナップショットを相手に更新しながら学習します。ただし純粋なSelf-playでは「破滅的忘却」が発生しました：
 
-### ステージ3: Self-play
+```
+純Self-play:  vs Random 77% → 44% に崩壊（カリキュラムで学んだ戦略を忘れる）
+混合率30%:    vs Random 60〜66% で推移
+混合率50%:    vs Random 70〜74% で安定  ← 採用
+```
 
-自分自身と対戦させ続けることで、どんな相手にも汎化できる強さを目指します。`GameRunner(env, dqn_agent, dqn_agent)` で実現可能な設計になっています。
+各エピソードでランダムにSelf-play相手かランダムAIかを選ぶことで、忘却を防ぎながら強くなり続けることができます。
 
-一定間隔でスナップショットを取りながら「現在の自分 vs 少し前の自分」を繰り返すことで、安定した学習を目指します。
+```
+eval列の見方:
+  勝率(直近500) ... Self-play相手への勝率（相対値、50%が拮抗）
+  vs Random    ... ランダムAI100戦での勝率（絶対的な強さの指標）
+```
