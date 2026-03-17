@@ -62,12 +62,12 @@ class Connect4Env:
         """
         置いた (row, col) を起点に攻防セットの中間報酬を返す（PLAYER1 視点）。
 
-        報酬設計:
-          自分の3連を作った    : +0.50
-          自分の2連を作った    : +0.15
-          相手の3連を防いだ    : +0.30
-          相手の2連を防いだ    : +0.10
-          相手の勝ち手を見逃した: -0.80（次に相手が勝てる手がある場合）
+        報酬設計（勝敗報酬 ±1.0 が支配的になるよう小さめに設定）:
+          自分の3連を作った    : +0.10
+          自分の2連を作った    : +0.03
+          相手の3連を防いだ    : +0.06
+          相手の2連を防いだ    : +0.02
+          相手の勝ち手を見逃した: -0.15（次に相手が勝てる手がある場合）
         """
         b = self.board
         opponent = self.PLAYER2 if player == self.PLAYER1 else self.PLAYER1
@@ -97,17 +97,17 @@ class Connect4Env:
 
         # 攻撃報酬
         if my_max >= 3:
-            attack = 0.50
+            attack = 0.10
         elif my_max >= 2:
-            attack = 0.15
+            attack = 0.03
         else:
             attack = 0.0
 
         # 防御報酬（相手の連を遮断した）
         if opp_max >= 3:
-            defense = 0.30
+            defense = 0.06
         elif opp_max >= 2:
-            defense = 0.10
+            defense = 0.02
         else:
             defense = 0.0
 
@@ -123,7 +123,7 @@ class Connect4Env:
                 continue
             b[top][c] = opponent
             if self._check_win(opponent):
-                miss_penalty = -0.80
+                miss_penalty = -0.15
             b[top][c] = self.EMPTY
             if miss_penalty != 0.0:
                 break

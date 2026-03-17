@@ -88,7 +88,7 @@ def make_agent(**kwargs):
         epsilon_start=1.0,
         epsilon_end=0.10,
         epsilon_decay=0.99990,
-        buffer_capacity=50000,
+        buffer_capacity=200000,
         batch_size=128,
         warmup_steps=2000,
         target_update_interval=500,
