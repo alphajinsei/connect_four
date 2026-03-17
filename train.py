@@ -136,8 +136,13 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 
     # 既存ログをフェーズ番号+タイムスタンプ付きでバックアップ
     if os.path.exists(LOG_PATH):
+        import shutil
         backup = LOG_PATH.replace(".txt", f"_ph{start_phase - 1}_{session_ts}.txt")
-        os.rename(LOG_PATH, backup)
+        try:
+            os.rename(LOG_PATH, backup)
+        except PermissionError:
+            # ファイルが別プロセス（エディタ等）で開かれている場合はコピーで退避
+            shutil.copy2(LOG_PATH, backup)
         print(f"前回ログを退避: {backup}", file=sys.stderr)
 
     tee        = Tee(LOG_PATH)
