@@ -30,6 +30,7 @@ train.py — DQN エージェントの学習スクリプト（ステージ7: シ
 import sys
 import os
 import argparse
+from datetime import datetime
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -130,11 +131,12 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
     os.makedirs("weights",     exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
+    # 学習セッションのタイムスタンプ（スナップショット名に使用）
+    session_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     # 既存ログをフェーズ番号+タイムスタンプ付きでバックアップ
     if os.path.exists(LOG_PATH):
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = LOG_PATH.replace(".txt", f"_ph{start_phase - 1}_{ts}.txt")
+        backup = LOG_PATH.replace(".txt", f"_ph{start_phase - 1}_{session_ts}.txt")
         os.rename(LOG_PATH, backup)
         print(f"前回ログを退避: {backup}", file=sys.stderr)
 
@@ -191,7 +193,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
             # 自己ベスト更新時にスナップショット保存
             if vs_rb > best_vs_rb:
                 best_vs_rb = vs_rb
-                best_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct")
+                best_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct_{session_ts}")
                 agent.save(best_path)
                 print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {best_path}.npz")
 
@@ -202,7 +204,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                 print(f"  [Clear {consecutive_clears}/{PHASE_UP_CONSECUTIVE}] vs Noisy {vs_noisy:.1f}% >= {target:.0f}%")
                 if consecutive_clears >= PHASE_UP_CONSECUTIVE:
                     # 昇格時スナップショット（フェーズ卒業時点の重み）
-                    grad_path = os.path.join(SNAPSHOTS_DIR, f"phaseup_ph{phase_idx + 1}_ep{episode}_rb{vs_rb:.0f}pct")
+                    grad_path = os.path.join(SNAPSHOTS_DIR, f"phaseup_ph{phase_idx + 1}_ep{episode}_rb{vs_rb:.0f}pct_{session_ts}")
                     agent.save(grad_path)
                     print(f"  [PhaseUp Snapshot] {grad_path}.npz")
 
