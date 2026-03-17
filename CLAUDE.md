@@ -41,7 +41,7 @@
 - **Pythonの実行は必ず `.venv` を使うこと**
   - 実行: `.venv/Scripts/python`
   - pip: `.venv/Scripts/pip`
-- インストール済みパッケージ: `numpy`, `flask`
+- インストール済みパッケージ: `numpy`, `flask`, `torch`（CPU版）
 - 学習速度: **約3エピソード/秒**（eval毎に300戦評価あり、eval_interval=1000）
 
 ## ファイル構成
@@ -120,12 +120,13 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 ### agents/dqn_agent.py
 - 入力: `3 × 6 × 7 = 126`、出力: `7`（列インデックス）
 - アーキテクチャ: `Linear(126→256) → ReLU → Linear(256→256) → ReLU → Linear(256→7)`
-- NumPyベース（PyTorch不使用）
+- **PyTorchベース**（ステージ8で移行。train_step 1.7倍速化）
 - ε-greedy + 無効手マスキング、ReplayBuffer、ターゲットネットワーク付き
-- `save()`/`load()`: 重みのみ（WebUI・スナップショットプール用、軽量）
-- `save_checkpoint()`/`load_checkpoint()`: 重み + ReplayBuffer + ε + total_steps + Adam状態（学習再開用）
-  - チェックポイントは `_checkpoint.npz` として別ファイル保存（`np.savez_compressed`で圧縮）
+- `save()`/`load()`: 重みのみ（`.pt` 形式、WebUI・スナップショット用）
+- `save_checkpoint()`/`load_checkpoint()`: 重み + ReplayBuffer + ε + total_steps + optimizer状態（学習再開用）
+  - チェックポイントは `_checkpoint.pt` として別ファイル保存
   - `load_checkpoint(path, load_buffer=False)` でバッファのみスキップ可能
+- **旧NumPy版の重み（`.npz`）とは互換性なし** — ステージ8以降はゼロから学習
 
 ### agents/rule_based_agent.py
 - 学習なし・手書きルールで動く
@@ -166,6 +167,7 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 ### 重要なバグ修正履歴
 - **2026-03-16**: `r + γ*maxQ` → `r - γ*maxQ` に修正（当時は next_state が相手ターンだったため）
 - **2026-03-17**: GameRunner を遅延コールバック方式に修正し、`r - γ*maxQ` → `r + γ*maxQ` に戻した（next_state が自分のターンになったため、通常の更新式が正しい）
+- **2026-03-17**: GameRunner の terminal_reward の符号バグを修正。遅延コールバック導入時から、負けた側に +1.0 が渡されていた（正しくは -1.0）。中間報酬があった頃はノイズに埋もれて発覚しなかったが、中間報酬廃止で顕在化。ステージ5〜7の全学習に影響していた可能性がある
 
 ### 中間報酬（シェーピング）設計（2026-03-16 改訂）
 

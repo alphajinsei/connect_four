@@ -147,7 +147,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 
     if load_path:
         agent = make_agent(epsilon_start=0.15)  # フォールバック用ε
-        ckpt_path = load_path + '_checkpoint.npz'
+        ckpt_path = load_path + '_checkpoint.pt'
         if os.path.exists(ckpt_path) and not no_buffer:
             agent.load_checkpoint(load_path, load_buffer=True)
             print(f"チェックポイントをロード: {load_path}  (ε={agent.epsilon:.4f}, steps={agent.total_steps}, buffer={len(agent.replay_buffer)})")
@@ -155,11 +155,11 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
             agent.load_checkpoint(load_path, load_buffer=False)
             print(f"重み+状態をロード(バッファなし): {load_path}  (ε={agent.epsilon:.4f}, steps={agent.total_steps})")
         else:
-            agent.load(load_path + ".npz")
-            print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
+            agent.load(load_path + ".pt")
+            print(f"重みをロード: {load_path}.pt  (ε={agent.epsilon:.4f})")
     else:
         agent = make_agent()
-        print("新規学習開始（ステージ7: シンプルカリキュラム学習）")
+        print("新規学習開始（ステージ8: カリキュラム学習 + 中間報酬なし + PyTorch）")
 
     print(f"ハイパーパラメータ: lr=5e-4, epsilon_end=0.10, target_update=500")
     print(f"カリキュラム: {CURRICULUM}")
@@ -195,7 +195,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                 best_vs_rb = vs_rb
                 best_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct_{session_ts}")
                 agent.save(best_path)
-                print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {best_path}.npz")
+                print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {best_path}.pt")
 
             # カリキュラム移行チェック（2回連続クリアで昇格）
             is_last_phase = (phase_idx >= len(CURRICULUM) - 1)
@@ -206,7 +206,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                     # 昇格時スナップショット（フェーズ卒業時点の重み）
                     grad_path = os.path.join(SNAPSHOTS_DIR, f"phaseup_ph{phase_idx + 1}_ep{episode}_rb{vs_rb:.0f}pct_{session_ts}")
                     agent.save(grad_path)
-                    print(f"  [PhaseUp Snapshot] {grad_path}.npz")
+                    print(f"  [PhaseUp Snapshot] {grad_path}.pt")
 
                     phase_idx += 1
                     noise, target = CURRICULUM[phase_idx]
@@ -222,7 +222,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 
     print("\n学習完了")
     agent.save_checkpoint(WEIGHTS_PATH)
-    print(f"重み+チェックポイントを保存: {WEIGHTS_PATH}.npz / {WEIGHTS_PATH}_checkpoint.npz")
+    print(f"重み+チェックポイントを保存: {WEIGHTS_PATH}.pt / {WEIGHTS_PATH}_checkpoint.pt")
     print(f"最終フェーズ: Phase {phase_idx + 1}")
     print(f"vs RuleBased ベスト: {best_vs_rb:.1f}%")
 

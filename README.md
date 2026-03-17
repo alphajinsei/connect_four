@@ -2,14 +2,16 @@
 
 四目並べ（Connect Four）を題材に、DQN（Deep Q-Network）による強化学習を実装・実験するプロジェクトです。
 
-PyTorchなどの深層学習フレームワークを使わず、**NumPyだけで**ニューラルネットの順伝播・逆伝播・Adamオプティマイザを手書きしています。ブラックボックスを排除し、DQNの仕組みを一から理解することを目的としています。
+DQN（Deep Q-Network）による強化学習を実装・実験するプロジェクトです。
+
+当初はNumPyのみで手書き実装していましたが、学習速度のボトルネック解消のためステージ8でPyTorchに移行しました。NumPy手書きフェーズでDQNの仕組み（順伝播・逆伝播・Adam）を一から理解した上で、実用的な速度を得ています。
 
 ## 概要
 
 - **目的**: 強化学習の基礎（DQN）を、Connect Fourで手を動かしながら学ぶ
 - **最終目標**: 初心者の人間より強くなる
-- **実装**: PyTorchなし、NumPyのみで手書きニューラルネット
-- **現在の方針**: 先手（PLAYER1）固定、シンプルカリキュラム学習（noise段階的低下 → 完全RuleBased）+ 遅延コールバック方式
+- **実装**: PyTorch（CPU）。ステージ7まではNumPy手書き
+- **現在の方針**: 先手（PLAYER1）固定、カリキュラム学習（noise段階的低下 → 完全RuleBased）+ 中間報酬なし + 遅延コールバック方式
 
 ## 学習ロードマップ
 
@@ -32,6 +34,7 @@ python -m venv .venv
 
 # 依存パッケージのインストール
 .venv\Scripts\pip install numpy flask
+.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ## 使い方
