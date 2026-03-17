@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import random
 from collections import deque
@@ -162,6 +163,32 @@ class ReplayBuffer:
             np.array(dones,       dtype=np.float32),
         )
 
+    def get_data_for_save(self):
+        """バッファの内容を numpy 配列として返す（保存用）"""
+        if len(self.buffer) == 0:
+            return {}
+        states, actions, rewards, next_states, dones = zip(*self.buffer)
+        return {
+            'buf_states': np.array(states, dtype=np.float32),
+            'buf_actions': np.array(actions, dtype=np.int32),
+            'buf_rewards': np.array(rewards, dtype=np.float32),
+            'buf_next_states': np.array(next_states, dtype=np.float32),
+            'buf_dones': np.array(dones, dtype=np.float32),
+        }
+
+    def load_from_data(self, data):
+        """numpy 配列からバッファを復元する"""
+        self.buffer.clear()
+        n = len(data['buf_states'])
+        for i in range(n):
+            self.buffer.append((
+                data['buf_states'][i],
+                int(data['buf_actions'][i]),
+                float(data['buf_rewards'][i]),
+                data['buf_next_states'][i],
+                float(data['buf_dones'][i]),
+            ))
+
     def __len__(self):
         return len(self.buffer)
 
@@ -269,3 +296,61 @@ class DQNAgent(BaseAgent):
         """重みを読み込む"""
         self.qnet.load(path)
         self.qnet_target.copy_weights_from(self.qnet)
+
+    def save_checkpoint(self, path):
+        """重み + バッファ + 学習状態を保存する（学習再開用）
+
+        重みは path.npz に、チェックポイントは path_checkpoint.npz に保存。
+        重みファイルは WebUI やスナップショットプールで使うため軽量のまま。
+        チェックポイントはバッファ・ε・Adam状態を含み、学習再開時のみ使用。
+        """
+        self.qnet.save(path)
+
+        ckpt = {
+            'epsilon': np.array(self.epsilon),
+            'total_steps': np.array(self.total_steps),
+            'adam_t': np.array(self.qnet.optimizer.t),
+        }
+        for key in self.qnet.optimizer.m:
+            ckpt[f'adam_m_{key}'] = self.qnet.optimizer.m[key]
+            ckpt[f'adam_v_{key}'] = self.qnet.optimizer.v[key]
+
+        buf_data = self.replay_buffer.get_data_for_save()
+        ckpt.update(buf_data)
+
+        np.savez_compressed(path + '_checkpoint', **ckpt)
+
+    def load_checkpoint(self, path, load_buffer=True):
+        """重み + 学習状態（+ オプションでバッファ）を復元する
+
+        Args:
+            path: 拡張子なしのパス（path.npz と path_checkpoint.npz を読む）
+            load_buffer: True ならバッファも復元、False なら重み+状態のみ
+        """
+        self.qnet.load(path + '.npz')
+        self.qnet_target.copy_weights_from(self.qnet)
+
+        ckpt_path = path + '_checkpoint.npz'
+        if not os.path.exists(ckpt_path):
+            return False
+
+        data = np.load(ckpt_path)
+
+        if 'epsilon' in data:
+            self.epsilon = float(data['epsilon'])
+        if 'total_steps' in data:
+            self.total_steps = int(data['total_steps'])
+
+        if 'adam_t' in data:
+            self.qnet.optimizer.t = int(data['adam_t'])
+            for key in self.qnet.params:
+                m_key = f'adam_m_{key}'
+                v_key = f'adam_v_{key}'
+                if m_key in data:
+                    self.qnet.optimizer.m[key] = data[m_key]
+                    self.qnet.optimizer.v[key] = data[v_key]
+
+        if load_buffer and 'buf_states' in data:
+            self.replay_buffer.load_from_data(data)
+
+        return True

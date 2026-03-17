@@ -77,13 +77,17 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 # 基本: カリキュラム学習でゼロから（推奨）
 .venv\Scripts\python train.py --episodes 30000
 
-# 学習済み重みから続き
+# 学習済みチェックポイントから続き（バッファ+ε+Adam状態を引き継ぐ）
 .venv\Scripts\python train.py --load-path weights/dqn_connect4 --episodes 30000
+
+# バッファを引き継がずに再開（重み+ε+Adam状態のみ復元）
+.venv\Scripts\python train.py --load-path weights/dqn_connect4 --no-buffer --episodes 30000
 ```
 - フェーズ自動移行: vs Noisy 勝率が目標値を超えたら次のフェーズへ（コンソールに `[Phase Up]` と表示）
-- 完了後 `weights/dqn_connect4.npz` に保存される
+- 完了後 `weights/dqn_connect4.npz`（重み）と `weights/dqn_connect4_checkpoint.npz`（バッファ+学習状態）に保存
 - 学習ログは `weights/train_log.txt` にリアルタイム書き出し
-- vs RuleBased 勝率（200戦）が自己ベストを更新するたびにスナップショット保存
+- vs RuleBased 勝率（200戦）が自己ベストを更新するたびにスナップショット保存（重みのみ、軽量）
+- フェーズ昇格時にもスナップショット保存（`phaseup_ph*`）
 
 ---
 
@@ -103,6 +107,10 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 - アーキテクチャ: `Linear(126→256) → ReLU → Linear(256→256) → ReLU → Linear(256→7)`
 - NumPyベース（PyTorch不使用）
 - ε-greedy + 無効手マスキング、ReplayBuffer、ターゲットネットワーク付き
+- `save()`/`load()`: 重みのみ（WebUI・スナップショットプール用、軽量）
+- `save_checkpoint()`/`load_checkpoint()`: 重み + ReplayBuffer + ε + total_steps + Adam状態（学習再開用）
+  - チェックポイントは `_checkpoint.npz` として別ファイル保存（`np.savez_compressed`で圧縮）
+  - `load_checkpoint(path, load_buffer=False)` でバッファのみスキップ可能
 
 ### agents/rule_based_agent.py
 - 学習なし・手書きルールで動く

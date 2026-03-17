@@ -156,7 +156,7 @@ def print_header(phase, noise, target, is_phase4=False):
     print("-" * 88)
 
 
-def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, max_phase=None):
+def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, max_phase=None, no_buffer=False):
     os.makedirs("weights",     exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -174,12 +174,20 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
     env = Connect4Env()
 
     if load_path:
-        agent = make_agent(epsilon_start=0.15)
-        agent.load(load_path + ".npz")
-        print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
+        agent = make_agent(epsilon_start=0.15)  # フォールバック用ε
+        ckpt_path = load_path + '_checkpoint.npz'
+        if os.path.exists(ckpt_path) and not no_buffer:
+            agent.load_checkpoint(load_path, load_buffer=True)
+            print(f"チェックポイントをロード: {load_path}  (ε={agent.epsilon:.4f}, steps={agent.total_steps}, buffer={len(agent.replay_buffer)})")
+        elif os.path.exists(ckpt_path):
+            agent.load_checkpoint(load_path, load_buffer=False)
+            print(f"重み+状態をロード(バッファなし): {load_path}  (ε={agent.epsilon:.4f}, steps={agent.total_steps})")
+        else:
+            agent.load(load_path + ".npz")
+            print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
     else:
         agent = make_agent()
-        print("新規学習開始（ステージ5: カリキュラム学習）")
+        print("新規学習開始（ステージ6: カリキュラム学習）")
 
     print(f"ハイパーパラメータ: lr=5e-4, epsilon_end=0.10, target_update=500")
     print(f"カリキュラム: {CURRICULUM}")
@@ -239,6 +247,11 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                 consecutive_clears += 1
                 print(f"  [Clear {consecutive_clears}/{PHASE_UP_CONSECUTIVE}] vs Noisy {vs_noisy:.1f}% >= {target:.0f}%")
                 if consecutive_clears >= PHASE_UP_CONSECUTIVE:
+                    # 昇格時スナップショット（フェーズ卒業時点の重み）
+                    grad_path = os.path.join(SNAPSHOTS_DIR, f"phaseup_ph{phase_idx + 1}_ep{episode}_rb{vs_rb:.0f}pct")
+                    agent.save(grad_path)
+                    print(f"  [PhaseUp Snapshot] {grad_path}.npz")
+
                     phase_idx += 1
                     noise, target = CURRICULUM[phase_idx]
                     is_phase4 = (phase_idx == len(CURRICULUM) - 1)
@@ -257,8 +270,8 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                 consecutive_clears = 0
 
     print("\n学習完了")
-    agent.save(WEIGHTS_PATH)
-    print(f"重みを保存しました: {WEIGHTS_PATH}.npz")
+    agent.save_checkpoint(WEIGHTS_PATH)
+    print(f"重み+チェックポイントを保存: {WEIGHTS_PATH}.npz / {WEIGHTS_PATH}_checkpoint.npz")
     print(f"最終フェーズ: Phase {phase_idx + 1}")
     print(f"vs RuleBased ベスト: {best_vs_rb:.1f}%")
 
@@ -277,6 +290,8 @@ if __name__ == "__main__":
                         help="開始フェーズ (1-4, デフォルト: 1)")
     parser.add_argument("--max-phase",     type=int, default=None,
                         help="このフェーズ以上には移行しない（例: --max-phase 3 でph3固定）")
+    parser.add_argument("--no-buffer",     action="store_true",
+                        help="ロード時にReplayBufferを引き継がない（重み+学習状態のみ復元）")
     args = parser.parse_args()
 
     train(
@@ -285,4 +300,5 @@ if __name__ == "__main__":
         load_path=args.load_path,
         start_phase=args.start_phase,
         max_phase=args.max_phase,
+        no_buffer=args.no_buffer,
     )
