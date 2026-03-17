@@ -53,20 +53,21 @@ class Connect4Env:
             self.winner = 0  # draw
             return self.get_state(), 0.0, True, {"winner": 0, "invalid_move": False}
 
-        # 中間報酬なし（勝敗報酬 ±1.0 のみ）
+        # 中間報酬: 攻防セットのシェーピング（現在は全て0、勝敗報酬のみで学習）
+        shaping = self._shaping_reward(self.current_player, row, col)
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
-        return self.get_state(), 0.0, False, {"winner": None, "invalid_move": False}
+        return self.get_state(), shaping, False, {"winner": None, "invalid_move": False}
 
     def _shaping_reward(self, player, row, col):
         """
         置いた (row, col) を起点に攻防セットの中間報酬を返す（PLAYER1 視点）。
 
-        報酬設計（勝敗報酬 ±1.0 が支配的になるよう小さめに設定）:
-          自分の3連を作った    : +0.10
-          自分の2連を作った    : +0.03
-          相手の3連を防いだ    : +0.06
-          相手の2連を防いだ    : +0.02
-          相手の勝ち手を見逃した: -0.15（次に相手が勝てる手がある場合）
+        報酬設計（現在は全て0 — 勝敗報酬±1.0のみで学習するベースライン実験中）:
+          自分の3連を作った    : 0  (元: +0.10)
+          自分の2連を作った    : 0  (元: +0.03)
+          相手の3連を防いだ    : 0  (元: +0.06)
+          相手の2連を防いだ    : 0  (元: +0.02)
+          相手の勝ち手を見逃した: 0  (元: -0.15)
         """
         b = self.board
         opponent = self.PLAYER2 if player == self.PLAYER1 else self.PLAYER1
@@ -96,17 +97,17 @@ class Connect4Env:
 
         # 攻撃報酬
         if my_max >= 3:
-            attack = 0.10
+            attack = 0  # 元: 0.10
         elif my_max >= 2:
-            attack = 0.03
+            attack = 0  # 元: 0.03
         else:
             attack = 0.0
 
         # 防御報酬（相手の連を遮断した）
         if opp_max >= 3:
-            defense = 0.06
+            defense = 0  # 元: 0.06
         elif opp_max >= 2:
-            defense = 0.02
+            defense = 0  # 元: 0.02
         else:
             defense = 0.0
 
@@ -122,7 +123,7 @@ class Connect4Env:
                 continue
             b[top][c] = opponent
             if self._check_win(opponent):
-                miss_penalty = -0.15
+                miss_penalty = 0  # 元: -0.15
             b[top][c] = self.EMPTY
             if miss_penalty != 0.0:
                 break

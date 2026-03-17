@@ -75,8 +75,8 @@ class GameRunner:
                 opponent = Connect4Env.PLAYER2 if current_player == Connect4Env.PLAYER1 else Connect4Env.PLAYER1
                 if pending[opponent] is not None:
                     p = pending[opponent]
-                    # 相手にとっての終局報酬を加算
-                    terminal_reward = -reward_p1 if opponent == Connect4Env.PLAYER1 else reward_p1
+                    # opponent 視点の終局報酬（reward_p1 は常に PLAYER1 視点）
+                    terminal_reward = reward_p1 if opponent == Connect4Env.PLAYER1 else -reward_p1
                     # 実際にはここが少し厄介: pending の reward は「相手が前回打った手の中間報酬」
                     # 終局報酬は「今の手で決着がついた」ことによるもの
                     # → pending の中間報酬 + 終局報酬を合算して返す
