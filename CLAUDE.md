@@ -23,7 +23,7 @@
 | 4 | NoisyRuleBased(noise=0.1) | 50% |
 | 5 | RuleBasedAgent(noise=0.0) | 40% |
 
-- 昇格条件: vs Noisy 500戦 × 2回連続クリア（まぐれ昇格防止）
+- 昇格条件: vs Noisy 200戦 × 2回連続クリア（まぐれ昇格防止）
 - Phase 5では完全ルールベースAI固定。過去（ステージ4）で失敗した理由は (1) next_stateバグ (2) 段階的強化なし の2つだったが、両方解消済み。崩壊が起きたら打ち切り判断可能。
 
 ### 過去の方針（破棄・理由は後述）
@@ -42,7 +42,7 @@
   - 実行: `.venv/Scripts/python`
   - pip: `.venv/Scripts/pip`
 - インストール済みパッケージ: `numpy`, `flask`
-- 学習速度: **約3エピソード/秒**（eval毎に200戦評価あり）
+- 学習速度: **約3エピソード/秒**（eval毎に300戦評価あり、eval_interval=1000）
 
 ## ファイル構成
 
@@ -101,7 +101,7 @@ cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 - フェーズ自動移行: vs Noisy 勝率が目標値を超えたら次のフェーズへ（コンソールに `[Phase Up]` と表示）
 - 完了後 `weights/dqn_connect4.npz`（重み）と `weights/dqn_connect4_checkpoint.npz`（バッファ+学習状態）に保存
 - 学習ログは `weights/train_log.txt` にリアルタイム書き出し
-- vs RuleBased 勝率（200戦）が自己ベストを更新するたびにスナップショット保存（重みのみ、軽量）
+- vs RuleBased 勝率（100戦）が自己ベストを更新するたびにスナップショット保存（重みのみ、軽量）
 - フェーズ昇格時にもスナップショット保存（`phaseup_ph*`）
 
 ---
@@ -337,7 +337,7 @@ ep19000で1回Clear → その後6500ep（約36分）2回目のClearなし
 # noise=0.3 → 70%はルールに従い、30%はランダム
 ```
 
-カリキュラム設計（昇格条件: vs Noisy 500戦 × 2回連続クリア）:
+カリキュラム設計（昇格条件: vs Noisy 200戦 × 2回連続クリア）:
 | フェーズ | 相手 | 目標勝率 |
 |---|---|---|
 | 1 | NoisyRuleBased(noise=0.8) | 75% |
@@ -348,8 +348,8 @@ ep19000で1回Clear → その後6500ep（約36分）2回目のClearなし
 
 **昇格条件の設計思想:**
 - 旧設計（vs Noisy 200戦 1回クリア）ではまぐれ昇格が発生（ph3を1500epで通過）
-- 500戦にすることで振れ幅を±7% → ±4%程度に縮小
-- 2回連続クリアを要求することで「一時的な上振れ」での昇格を防ぐ
+- 200戦 + 2回連続クリアを要求することで「一時的な上振れ」での昇格を防ぐ
+- eval_interval=1000、eval_vs_rulebased=100戦に削減し、eval負荷を軽減（2026-03-17）
 
 **Phase 5（完全RuleBased）の設計思想:**
 - 過去（ステージ4）で完全RuleBased固定は失敗したが、原因は (1) next_stateバグ (2) 段階的強化なし の2つ
@@ -391,6 +391,25 @@ ep19000で1回Clear → その後6500ep（約36分）2回目のClearなし
 # 中断後の再開
 .venv/Scripts/python train.py --load-path weights/dqn_connect4 --episodes 50000
 ```
+
+### eval負荷削減（2026-03-17）
+
+学習速度のボトルネックがeval（評価対戦）にあることが判明。500エピソード学習するたびにeval 700戦（vs Noisy 500 + vs RuleBased 200）を回しており、全体の約58%がeval時間だった。以下の変更で学習スループットを2〜3倍に改善：
+
+| 項目 | 変更前 | 変更後 |
+|------|--------|--------|
+| eval_interval | 500 | 1000 |
+| vs Noisy（昇格判定） | 500戦 | 200戦 |
+| vs RuleBased（ベスト更新） | 200戦 | 100戦 |
+| 直近勝率の集計幅 | 直近500 | 直近1000 |
+
+昇格判定の精度は2回連続クリア要件で担保。
+
+**今後の追加高速化案（未実施）:**
+- ビットボード化（_check_win の O(1) 判定）
+- Numba JIT（_check_win, _shaping_reward のPythonループ排除）
+- PyTorch移行（GPU活用、ただし工数大）
+- クラウドVM（高クロックCPU、NumPyのままでも効果あり）
 
 ## 今後の展望
 

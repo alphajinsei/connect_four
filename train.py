@@ -8,14 +8,14 @@ train.py — DQN エージェントの学習スクリプト（ステージ7: シ
   - 攻防セット中間報酬（connect4_env.py 内）
 
 カリキュラム:
-  Phase 1: noise=0.8 → 目標勝率 75%（vs Noisy 500戦、2回連続クリアで昇格）
-  Phase 2: noise=0.5 → 目標勝率 70%（vs Noisy 500戦、2回連続クリアで昇格）
-  Phase 3: noise=0.2 → 目標勝率 60%（vs Noisy 500戦、2回連続クリアで昇格）
-  Phase 4: noise=0.1 → 目標勝率 50%（vs Noisy 500戦、2回連続クリアで昇格）
+  Phase 1: noise=0.8 → 目標勝率 75%（vs Noisy 200戦、2回連続クリアで昇格）
+  Phase 2: noise=0.5 → 目標勝率 70%（vs Noisy 200戦、2回連続クリアで昇格）
+  Phase 3: noise=0.2 → 目標勝率 60%（vs Noisy 200戦、2回連続クリアで昇格）
+  Phase 4: noise=0.1 → 目標勝率 50%（vs Noisy 200戦、2回連続クリアで昇格）
   Phase 5: noise=0.0 → 目標勝率 40%（完全ルールベースAI）
 
 昇格基準の設計思想:
-  - 500戦 + 2回連続クリアで、一時的な上振れによる早期昇格を防ぐ
+  - 200戦 + 2回連続クリアで、一時的な上振れによる早期昇格を防ぐ
 
 使い方:
     # ゼロから学習
@@ -56,8 +56,8 @@ CURRICULUM = [
 
 # 昇格に必要な連続クリア回数
 PHASE_UP_CONSECUTIVE = 2
-# 昇格判定のeval対戦数（振れ幅を減らすため200→500）
-PHASE_UP_EVAL_N = 500
+# 昇格判定のeval対戦数（2回連続クリアで精度を担保）
+PHASE_UP_EVAL_N = 200
 
 
 class Tee:
@@ -94,7 +94,7 @@ def make_agent(**kwargs):
     return DQNAgent(**defaults)
 
 
-def eval_vs_rulebased(agent, env, n=200):
+def eval_vs_rulebased(agent, env, n=100):
     """ルールベースAI（noise=0）と n 戦して勝率を返す（greedy、学習なし）"""
     runner        = GameRunner(env, agent, RuleBasedAgent(), renderer=None)
     saved_eps     = agent.epsilon
@@ -123,7 +123,7 @@ def eval_vs_noisy(agent, env, noise, n=200):
 def print_header(phase, noise, target):
     desc = f"noise={noise:.1f}" if noise > 0 else "RuleBased(純粋)"
     print(f"\n=== Phase {phase}: {desc}, 目標勝率={target:.0f}% (昇格条件: {PHASE_UP_EVAL_N}戦×{PHASE_UP_CONSECUTIVE}回連続) ===")
-    print(f"{'Episode':>8} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Noisy(500)':>14} | {'vs RuleBased(200)':>18}")
+    print(f"{'Episode':>8} | {'勝率(直近1000)':>15} | {'平均報酬':>10} | {'ε':>7} | {'vs Noisy(200)':>14} | {'vs RuleBased(100)':>18}")
     print("-" * 88)
 
 
@@ -183,8 +183,8 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
         reward_history.append(stats["reward_p1"])
 
         if episode % eval_interval == 0:
-            win_rate   = np.mean(win_history[-500:]) * 100
-            avg_reward = np.mean(reward_history[-500:])
+            win_rate   = np.mean(win_history[-1000:]) * 100
+            avg_reward = np.mean(reward_history[-1000:])
             vs_noisy   = eval_vs_noisy(agent, env, noise, n=PHASE_UP_EVAL_N)
             vs_rb      = eval_vs_rulebased(agent, env)
 
@@ -234,7 +234,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes",      type=int, default=30000)
-    parser.add_argument("--eval-interval", type=int, default=500)
+    parser.add_argument("--eval-interval", type=int, default=1000)
     parser.add_argument("--load-path",     type=str, default=None,
                         help="学習済み重みから再開 例: weights/dqn_connect4")
     parser.add_argument("--start-phase",   type=int, default=1,
