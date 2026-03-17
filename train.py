@@ -1,11 +1,11 @@
 """
-train.py — DQN エージェントの学習スクリプト（ステージ9: カリキュラム学習 + 極小中間報酬）
+train.py — DQN エージェントの学習スクリプト（ステージ10: CNN + カリキュラム学習 + 中間報酬なし）
 
 設計方針:
   - DQN は常に PLAYER1（先手）として学習
   - 対戦相手は NoisyRuleBasedAgent（noise で強さを制御）
   - 勝率しきい値を超えたら自動的に次のフェーズへ移行
-  - 報酬は勝敗（±1.0）+ 極小中間報酬（3連+0.03, 防御+0.02, 見逃し-0.05）
+  - 報酬は勝敗（±1.0）のみ。CNN が空間パターンを認識するため中間報酬は不要
 
 カリキュラム:
   Phase 1: noise=0.8 → 目標勝率 75%（vs Noisy 200戦、2回連続クリアで昇格）
@@ -164,7 +164,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
             print(f"重みをロード: {load_path}.pt  (ε={agent.epsilon:.4f})")
     else:
         agent = make_agent()
-        print("新規学習開始（ステージ9: カリキュラム学習 + 極小中間報酬 + PyTorch）")
+        print("新規学習開始（ステージ10: CNN + カリキュラム学習 + 中間報酬なし + PyTorch）")
 
     print(f"ハイパーパラメータ: lr=5e-4, epsilon_end=0.10, target_update=500")
     print(f"カリキュラム: {CURRICULUM}")

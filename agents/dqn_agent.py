@@ -14,28 +14,39 @@ from agents.base_agent import BaseAgent
 
 class QNetwork(nn.Module):
     """
-    入力: shape=(3, 6, 7) → flatten → 126次元
-    出力: 各列のQ値 shape=(7,)
-    構造: Linear(126→256) -> ReLU -> Linear(256→256) -> ReLU -> Linear(256→7)
+    CNN版: 入力 shape=(B, 3, 6, 7) → Conv2d×2 → flatten → FC → Q値 (B, 7)
+
+    Conv2d(3→32, 3×3, pad=1) → ReLU → Conv2d(32→64, 3×3, pad=1) → ReLU
+    → flatten(64*6*7=2688) → Linear(2688→256) → ReLU → Linear(256→7)
     """
 
-    def __init__(self, input_size=126, hidden_size=256, output_size=7):
+    def __init__(self, output_size=7):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+        self.conv = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(hidden_size, output_size),
         )
-        # He初期化（NumPy版と同等）
-        for layer in self.net:
-            if isinstance(layer, nn.Linear):
-                nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-                nn.init.zeros_(layer.bias)
+        self.fc = nn.Sequential(
+            nn.Linear(64 * 6 * 7, 256),
+            nn.ReLU(),
+            nn.Linear(256, output_size),
+        )
+        # He初期化
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        return self.net(x)
+        # x: (B, 3, 6, 7)
+        h = self.conv(x)
+        h = h.view(h.size(0), -1)  # (B, 64*6*7)
+        return self.fc(h)
 
 
 # ============================================================
@@ -127,8 +138,8 @@ class DQNAgent(BaseAgent):
 
         self.device = torch.device('cpu')
 
-        self.qnet        = QNetwork(input_size=126, hidden_size=256, output_size=7).to(self.device)
-        self.qnet_target = QNetwork(input_size=126, hidden_size=256, output_size=7).to(self.device)
+        self.qnet        = QNetwork(output_size=7).to(self.device)
+        self.qnet_target = QNetwork(output_size=7).to(self.device)
         self.qnet_target.load_state_dict(self.qnet.state_dict())
         self.qnet_target.eval()
 
@@ -143,7 +154,7 @@ class DQNAgent(BaseAgent):
             return random.choice(valid_actions)
 
         with torch.no_grad():
-            state_t = torch.from_numpy(state.flatten()).unsqueeze(0).to(self.device)  # (1, 126)
+            state_t = torch.from_numpy(state).unsqueeze(0).to(self.device)  # (1, 3, 6, 7)
             q_values = self.qnet(state_t)[0].numpy()  # (7,)
 
         masked_q = np.full(self.action_size, -np.inf)
@@ -174,11 +185,11 @@ class DQNAgent(BaseAgent):
     def _train_step(self):
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
 
-        states_t      = torch.from_numpy(states.reshape(self.batch_size, -1)).to(self.device)       # (B, 126)
-        actions_t     = torch.from_numpy(actions).long().to(self.device)                              # (B,)
-        rewards_t     = torch.from_numpy(rewards).to(self.device)                                     # (B,)
-        next_states_t = torch.from_numpy(next_states.reshape(self.batch_size, -1)).to(self.device)   # (B, 126)
-        dones_t       = torch.from_numpy(dones).to(self.device)                                       # (B,)
+        states_t      = torch.from_numpy(states).to(self.device)         # (B, 3, 6, 7)
+        actions_t     = torch.from_numpy(actions).long().to(self.device)  # (B,)
+        rewards_t     = torch.from_numpy(rewards).to(self.device)         # (B,)
+        next_states_t = torch.from_numpy(next_states).to(self.device)     # (B, 3, 6, 7)
+        dones_t       = torch.from_numpy(dones).to(self.device)           # (B,)
 
         # 現在のQ値: Q(s, a) を取得
         current_q = self.qnet(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)  # (B,)

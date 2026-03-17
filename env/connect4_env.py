@@ -53,8 +53,9 @@ class Connect4Env:
             self.winner = 0  # draw
             return self.get_state(), 0.0, True, {"winner": 0, "invalid_move": False}
 
-        # 中間報酬: 極小スケールのシェーピング（1ゲーム累積 ≪ 勝敗±1.0）
-        shaping = self._shaping_reward(self.current_player, row, col)
+        # 中間報酬なし（勝敗報酬±1.0のみ）
+        # CNN導入により空間パターン認識が可能になったため、中間報酬は不要
+        shaping = 0.0
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
         return self.get_state(), shaping, False, {"winner": None, "invalid_move": False}
 
