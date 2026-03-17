@@ -53,10 +53,9 @@ class Connect4Env:
             self.winner = 0  # draw
             return self.get_state(), 0.0, True, {"winner": 0, "invalid_move": False}
 
-        # 中間報酬: 攻防セットのシェーピング
-        shaping = self._shaping_reward(self.current_player, row, col)
+        # 中間報酬なし（勝敗報酬 ±1.0 のみ）
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
-        return self.get_state(), shaping, False, {"winner": None, "invalid_move": False}
+        return self.get_state(), 0.0, False, {"winner": None, "invalid_move": False}
 
     def _shaping_reward(self, player, row, col):
         """
