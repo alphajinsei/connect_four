@@ -61,21 +61,30 @@ PHASE_UP_EVAL_N = 200
 
 
 class Tee:
-    """stdout とファイルに同時に書き出す"""
+    """stdout とファイルに同時に書き出す。
+
+    OneDrive 配下ではファイル同期がバッファ書き込みを壊すことがあるため、
+    毎行 append モードで開き直して書き込む方式を採用。
+    """
     def __init__(self, path):
-        self._file   = open(path, "w", encoding="utf-8", buffering=1)
+        self._path   = path
         self._stdout = sys.stdout
+        # 既存ファイルをクリア（新規セッション開始）
+        with open(path, "w", encoding="utf-8") as f:
+            pass
 
     def write(self, data):
         self._stdout.write(data)
-        self._file.write(data)
+        with open(self._path, "a", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
 
     def flush(self):
         self._stdout.flush()
-        self._file.flush()
 
     def close(self):
-        self._file.close()
+        pass
 
 
 def make_agent(**kwargs):
