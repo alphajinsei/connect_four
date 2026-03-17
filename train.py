@@ -1,5 +1,5 @@
 """
-train.py — DQN エージェントの学習スクリプト（ステージ5: カリキュラム学習）
+train.py — DQN エージェントの学習スクリプト（ステージ7: シンプルカリキュラム学習）
 
 設計方針:
   - DQN は常に PLAYER1（先手）として学習
@@ -8,26 +8,21 @@ train.py — DQN エージェントの学習スクリプト（ステージ5: カ
   - 攻防セット中間報酬（connect4_env.py 内）
 
 カリキュラム:
-  Phase 1: noise=0.8 → 目標勝率 80%（vs Noisy 500戦、2回連続クリアで昇格）
+  Phase 1: noise=0.8 → 目標勝率 75%（vs Noisy 500戦、2回連続クリアで昇格）
   Phase 2: noise=0.5 → 目標勝率 70%（vs Noisy 500戦、2回連続クリアで昇格）
-  Phase 3: noise=0.2 → 目標勝率 50%（vs Noisy 500戦、2回連続クリアで昇格）
-  Phase 4: noise=0.1（NoisyRuleBased）50% + スナップショットプール 50% → 目標勝率 50%
+  Phase 3: noise=0.2 → 目標勝率 60%（vs Noisy 500戦、2回連続クリアで昇格）
+  Phase 4: noise=0.1 → 目標勝率 50%（vs Noisy 500戦、2回連続クリアで昇格）
+  Phase 5: noise=0.0 → 目標勝率 40%（完全ルールベースAI）
 
 昇格基準の設計思想:
-  - 200戦では統計的振れ幅が大きく（±7%程度）まぐれ昇格が起きた（ph3を1500epで通過）
-  - 500戦 + 2回連続クリアにすることで、一時的な上振れによる早期昇格を防ぐ
-
-Phase 4の設計思想:
-  - 完全ルールベース固定では「固定相手への過学習→崩壊」が繰り返された（ステージ4の失敗再現）
-  - noise=0.1（90%ルールベース、10%ランダム）で微妙なランダム性を加えて癖への過学習を防ぐ
-  - スナップショット（過去の自分）を50%混ぜて多様性を確保し、破滅的忘却を防ぐ
+  - 500戦 + 2回連続クリアで、一時的な上振れによる早期昇格を防ぐ
 
 使い方:
     # ゼロから学習
-    .venv/Scripts/python train.py --episodes 30000
+    .venv/Scripts/python train.py --episodes 50000
 
     # 学習済み重みから続き
-    .venv/Scripts/python train.py --load-path weights/dqn_connect4 --episodes 30000
+    .venv/Scripts/python train.py --load-path weights/dqn_connect4 --episodes 50000
 
     # フェーズ指定で再開
     .venv/Scripts/python train.py --load-path weights/snapshots/best_epXXXX --start-phase 3
@@ -51,10 +46,11 @@ LOG_PATH      = "weights/train_log.txt"
 
 # カリキュラム定義: (noise, 目標勝率%)
 CURRICULUM = [
-    (0.8, 80.0),
-    (0.5, 70.0),
-    (0.2, 50.0),
-    (0.1, 50.0),  # Phase 4: noise=0.1 + スナップショットプール
+    (0.8, 75.0),   # Phase 1: ほぼランダム
+    (0.5, 70.0),   # Phase 2: 半分ルールベース
+    (0.2, 60.0),   # Phase 3: 8割ルールベース
+    (0.1, 50.0),   # Phase 4: 9割ルールベース
+    (0.0, 40.0),   # Phase 5: 完全ルールベースAI
 ]
 
 # 昇格に必要な連続クリア回数
@@ -123,34 +119,8 @@ def eval_vs_noisy(agent, env, noise, n=200):
     return wins / n * 100
 
 
-def load_snapshot_pool(snapshot_dir, min_rb_pct=50):
-    """スナップショットからvs RuleBased勝率がmin_rb_pct以上のものだけ読み込む"""
-    import re
-    pool = []
-    for fname in os.listdir(snapshot_dir):
-        if not fname.endswith(".npz"):
-            continue
-        m = re.search(r"rb(\d+)pct", fname)
-        if m and int(m.group(1)) >= min_rb_pct:
-            a = make_agent(epsilon_start=0.0)
-            a.load(os.path.join(snapshot_dir, fname))
-            a.epsilon = 0.0
-            pool.append(a)
-    return pool
-
-
-def make_phase4_opponent(snapshot_pool):
-    """Phase 4用: 50%でNoisyRuleBased(noise=0.1)、50%でスナップショットからランダム選択"""
-    if snapshot_pool and np.random.random() < 0.5:
-        return np.random.choice(snapshot_pool)
-    return NoisyRuleBasedAgent(noise=0.1)
-
-
-def print_header(phase, noise, target, is_phase4=False):
-    if is_phase4:
-        desc = f"noise=0.1×50% + snapshot×50%"
-    else:
-        desc = f"noise={noise:.1f}"
+def print_header(phase, noise, target):
+    desc = f"noise={noise:.1f}" if noise > 0 else "RuleBased(純粋)"
     print(f"\n=== Phase {phase}: {desc}, 目標勝率={target:.0f}% (昇格条件: {PHASE_UP_EVAL_N}戦×{PHASE_UP_CONSECUTIVE}回連続) ===")
     print(f"{'Episode':>8} | {'勝率(直近500)':>14} | {'平均報酬':>10} | {'ε':>7} | {'vs Noisy(500)':>14} | {'vs RuleBased(200)':>18}")
     print("-" * 88)
@@ -187,7 +157,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
             print(f"重みをロード: {load_path}.npz  (ε={agent.epsilon:.4f})")
     else:
         agent = make_agent()
-        print("新規学習開始（ステージ6: カリキュラム学習）")
+        print("新規学習開始（ステージ7: シンプルカリキュラム学習）")
 
     print(f"ハイパーパラメータ: lr=5e-4, epsilon_end=0.10, target_update=500")
     print(f"カリキュラム: {CURRICULUM}")
@@ -201,21 +171,11 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 
     phase_idx   = max(0, start_phase - 1)
     noise, target = CURRICULUM[phase_idx]
-    is_phase4   = (phase_idx == len(CURRICULUM) - 1)
 
-    # Phase 4用スナップショットプール
-    snapshot_pool = load_snapshot_pool(SNAPSHOTS_DIR) if is_phase4 else []
-    if is_phase4:
-        print(f"スナップショットプール: {len(snapshot_pool)}体ロード")
-
-    opp = make_phase4_opponent(snapshot_pool) if is_phase4 else NoisyRuleBasedAgent(noise=noise)
-    print_header(phase_idx + 1, noise, target, is_phase4)
+    opp = NoisyRuleBasedAgent(noise=noise) if noise > 0 else RuleBasedAgent()
+    print_header(phase_idx + 1, noise, target)
 
     for episode in range(1, num_episodes + 1):
-        # Phase 4はエピソードごとに対戦相手をランダム選択
-        if is_phase4:
-            opp = make_phase4_opponent(snapshot_pool)
-
         stats = GameRunner(env, agent, opp, renderer=None).run_episode()
         win_history.append(1 if stats["winner"] == Connect4Env.PLAYER1 else 0)
         reward_history.append(stats["reward_p1"])
@@ -234,16 +194,10 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
                 best_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct")
                 agent.save(best_path)
                 print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {best_path}.npz")
-                # Phase 4ならプールに追加
-                if is_phase4:
-                    new_agent = make_agent(epsilon_start=0.0)
-                    new_agent.load(best_path + ".npz")
-                    new_agent.epsilon = 0.0
-                    snapshot_pool.append(new_agent)
-                    print(f"  [Pool] スナップショットプールに追加（計{len(snapshot_pool)}体）")
 
             # カリキュラム移行チェック（2回連続クリアで昇格）
-            if not is_phase4 and vs_noisy >= target and (max_phase is None or phase_idx + 1 < max_phase):
+            is_last_phase = (phase_idx >= len(CURRICULUM) - 1)
+            if not is_last_phase and vs_noisy >= target and (max_phase is None or phase_idx + 1 < max_phase):
                 consecutive_clears += 1
                 print(f"  [Clear {consecutive_clears}/{PHASE_UP_CONSECUTIVE}] vs Noisy {vs_noisy:.1f}% >= {target:.0f}%")
                 if consecutive_clears >= PHASE_UP_CONSECUTIVE:
@@ -254,18 +208,13 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, 
 
                     phase_idx += 1
                     noise, target = CURRICULUM[phase_idx]
-                    is_phase4 = (phase_idx == len(CURRICULUM) - 1)
                     consecutive_clears = 0
                     win_history.clear()
                     reward_history.clear()
-                    if is_phase4:
-                        snapshot_pool = load_snapshot_pool(SNAPSHOTS_DIR)
-                        opp = make_phase4_opponent(snapshot_pool)
-                        print(f"\n  [Phase Up] → Phase {phase_idx + 1}: noise=0.1×50% + snapshot×50%（{len(snapshot_pool)}体）, 目標勝率={target:.0f}%")
-                    else:
-                        opp = NoisyRuleBasedAgent(noise=noise)
-                        print(f"\n  [Phase Up] → Phase {phase_idx + 1}: noise={noise:.1f}, 目標勝率={target:.0f}%")
-                    print_header(phase_idx + 1, noise, target, is_phase4)
+                    opp = NoisyRuleBasedAgent(noise=noise) if noise > 0 else RuleBasedAgent()
+                    desc = f"noise={noise:.1f}" if noise > 0 else "RuleBased(純粋)"
+                    print(f"\n  [Phase Up] → Phase {phase_idx + 1}: {desc}, 目標勝率={target:.0f}%")
+                    print_header(phase_idx + 1, noise, target)
             else:
                 consecutive_clears = 0
 
@@ -287,7 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--load-path",     type=str, default=None,
                         help="学習済み重みから再開 例: weights/dqn_connect4")
     parser.add_argument("--start-phase",   type=int, default=1,
-                        help="開始フェーズ (1-4, デフォルト: 1)")
+                        help="開始フェーズ (1-5, デフォルト: 1)")
     parser.add_argument("--max-phase",     type=int, default=None,
                         help="このフェーズ以上には移行しない（例: --max-phase 3 でph3固定）")
     parser.add_argument("--no-buffer",     action="store_true",
