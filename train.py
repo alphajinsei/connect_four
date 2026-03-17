@@ -123,11 +123,15 @@ def eval_vs_noisy(agent, env, noise, n=200):
     return wins / n * 100
 
 
-def load_snapshot_pool(snapshot_dir):
-    """スナップショットディレクトリから全DQNAgentを読み込んでリストで返す"""
+def load_snapshot_pool(snapshot_dir, min_rb_pct=50):
+    """スナップショットからvs RuleBased勝率がmin_rb_pct以上のものだけ読み込む"""
+    import re
     pool = []
     for fname in os.listdir(snapshot_dir):
-        if fname.endswith(".npz"):
+        if not fname.endswith(".npz"):
+            continue
+        m = re.search(r"rb(\d+)pct", fname)
+        if m and int(m.group(1)) >= min_rb_pct:
             a = make_agent(epsilon_start=0.0)
             a.load(os.path.join(snapshot_dir, fname))
             a.epsilon = 0.0
@@ -152,7 +156,7 @@ def print_header(phase, noise, target, is_phase4=False):
     print("-" * 88)
 
 
-def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1):
+def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1, max_phase=None):
     os.makedirs("weights",     exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -231,7 +235,7 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, start_phase=1):
                     print(f"  [Pool] スナップショットプールに追加（計{len(snapshot_pool)}体）")
 
             # カリキュラム移行チェック（2回連続クリアで昇格）
-            if not is_phase4 and vs_noisy >= target:
+            if not is_phase4 and vs_noisy >= target and (max_phase is None or phase_idx + 1 < max_phase):
                 consecutive_clears += 1
                 print(f"  [Clear {consecutive_clears}/{PHASE_UP_CONSECUTIVE}] vs Noisy {vs_noisy:.1f}% >= {target:.0f}%")
                 if consecutive_clears >= PHASE_UP_CONSECUTIVE:
@@ -271,6 +275,8 @@ if __name__ == "__main__":
                         help="学習済み重みから再開 例: weights/dqn_connect4")
     parser.add_argument("--start-phase",   type=int, default=1,
                         help="開始フェーズ (1-4, デフォルト: 1)")
+    parser.add_argument("--max-phase",     type=int, default=None,
+                        help="このフェーズ以上には移行しない（例: --max-phase 3 でph3固定）")
     args = parser.parse_args()
 
     train(
@@ -278,4 +284,5 @@ if __name__ == "__main__":
         eval_interval=args.eval_interval,
         load_path=args.load_path,
         start_phase=args.start_phase,
+        max_phase=args.max_phase,
     )
