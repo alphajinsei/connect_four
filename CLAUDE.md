@@ -80,7 +80,7 @@
 
 ## Webアプリの起動方法
 ```bash
-cd c:\Users\peinn\OneDrive\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
+cd c:\Users\peinn\sandbox\claude-sandbox\RL_ReinforcementLearning\4moku
 .venv\Scripts\python web/app.py
 # ブラウザで http://localhost:5000 を開く
 ```
