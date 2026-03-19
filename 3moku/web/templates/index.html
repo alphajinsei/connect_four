@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect Three</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, #e94560, #0f3460);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #status {
+      font-size: 1.1rem;
+      margin-bottom: 20px;
+      min-height: 1.6em;
+      color: #aad4f5;
+      font-weight: 600;
+    }
+
+    #board-wrapper {
+      background: #0f3460;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    #arrow-row {
+      display: grid;
+      grid-template-columns: repeat(5, 70px);
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .arrow-cell {
+      width: 70px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 1.2rem;
+      color: transparent;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .arrow-cell:hover { color: #e94560; background: rgba(255,255,255,0.08); }
+    .arrow-cell.blocked { cursor: default; }
+    .arrow-cell.blocked:hover { color: transparent; background: none; }
+
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(5, 70px);
+      grid-template-rows: repeat(5, 70px);
+      gap: 6px;
+    }
+
+    .cell {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: #1a1a2e;
+      transition: background 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cell.drop {
+      animation: drop-in 0.3s ease-out;
+    }
+
+    @keyframes drop-in {
+      from { transform: translateY(-300px); }
+      to   { transform: translateY(0); }
+    }
+
+    .cell.p1 { background: #e94560; box-shadow: 0 0 12px rgba(233,69,96,0.6); }
+    .cell.p2 { background: #f5a623; box-shadow: 0 0 12px rgba(245,166,35,0.6); }
+
+    .cell.winner-cell {
+      animation: pulse 0.8s ease-in-out infinite alternate;
+    }
+    @keyframes pulse {
+      from { box-shadow: 0 0 8px rgba(255,255,255,0.4); }
+      to   { box-shadow: 0 0 24px rgba(255,255,255,1); transform: scale(1.08); }
+    }
+
+    #new-game-btn {
+      margin-top: 24px;
+      padding: 12px 36px;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      border: none;
+      border-radius: 30px;
+      background: linear-gradient(135deg, #e94560, #0f3460);
+      color: white;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 4px 16px rgba(233,69,96,0.4);
+    }
+    #new-game-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(233,69,96,0.5); }
+    #new-game-btn:active { transform: translateY(0); }
+
+    #legend {
+      display: flex;
+      gap: 24px;
+      margin-top: 20px;
+      font-size: 0.9rem;
+    }
+    .legend-item { display: flex; align-items: center; gap: 8px; }
+    .legend-dot {
+      width: 20px; height: 20px; border-radius: 50%;
+    }
+    .legend-dot.p1 { background: #e94560; }
+    .legend-dot.p2 { background: #f5a623; }
+  </style>
+</head>
+<body>
+
+<h1>Connect Three</h1>
+<div id="status">新しいゲームを開始してください</div>
+
+<div id="board-wrapper">
+  <div id="arrow-row">
+    <div class="arrow-cell" data-col="0">▼</div>
+    <div class="arrow-cell" data-col="1">▼</div>
+    <div class="arrow-cell" data-col="2">▼</div>
+    <div class="arrow-cell" data-col="3">▼</div>
+    <div class="arrow-cell" data-col="4">▼</div>
+  </div>
+  <div id="grid"></div>
+</div>
+
+<button id="new-game-btn">New Game</button>
+
+<div id="legend">
+  <div class="legend-item">
+    <div class="legend-dot p1"></div>
+    <span>CPU (赤・先攻)</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot p2"></div>
+    <span>あなた (橙・後攻)</span>
+  </div>
+</div>
+
+<script>
+  const ROWS = 5, COLS = 5;
+  let gameState = null;
+  let busy = false;
+
+  const grid = document.getElementById('grid');
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      grid.appendChild(cell);
+    }
+  }
+
+  function getCell(row, col) {
+    return grid.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+  }
+
+  function renderBoard(board) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = getCell(r, c);
+        const v = board[r][c];
+        cell.className = 'cell';
+        if (v === 1)  cell.classList.add('p1');
+        if (v === -1) cell.classList.add('p2');
+      }
+    }
+  }
+
+  function dropPiece(row, col, playerClass) {
+    return new Promise(resolve => {
+      const cell = getCell(row, col);
+      cell.className = `cell ${playerClass} drop`;
+      cell.addEventListener('animationend', () => {
+        cell.classList.remove('drop');
+        resolve();
+      }, { once: true });
+    });
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status').textContent = msg;
+  }
+
+  function setArrows(validActions, enabled) {
+    document.querySelectorAll('.arrow-cell').forEach(a => {
+      const col = parseInt(a.dataset.col);
+      if (!enabled || !validActions.includes(col)) {
+        a.classList.add('blocked');
+      } else {
+        a.classList.remove('blocked');
+      }
+    });
+  }
+
+  function highlightWinner(board, winner) {
+    if (!winner && winner !== 0) return;
+    const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (board[r][c] !== winner) continue;
+        for (const [dr, dc] of dirs) {
+          let line = [];
+          for (let i = 0; i < 3; i++) {
+            const nr = r + dr*i, nc = c + dc*i;
+            if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) break;
+            if (board[nr][nc] !== winner) break;
+            line.push([nr, nc]);
+          }
+          if (line.length === 3) {
+            line.forEach(([lr, lc]) => getCell(lr, lc).classList.add('winner-cell'));
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  async function newGame() {
+    busy = true;
+    setArrows([], false);
+    const res = await fetch('/api/new_game', { method: 'POST' });
+    const data = await res.json();
+    gameState = data;
+
+    renderBoard(Array.from({length: ROWS}, () => Array(COLS).fill(0)));
+    setStatus('CPUが先手を打ちました...');
+
+    if (data.ai_col !== null && data.ai_col !== undefined) {
+      await dropPiece(data.ai_row, data.ai_col, 'p1');
+    }
+    renderBoard(data.board);
+
+    setArrows(data.valid_actions, true);
+    setStatus('あなたの番です（橙）');
+    busy = false;
+  }
+
+  async function makeMove(col) {
+    if (busy || !gameState || gameState.done) return;
+    if (!gameState.valid_actions.includes(col)) return;
+    busy = true;
+    setArrows([], false);
+
+    const res = await fetch('/api/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ col }),
+    });
+    const data = await res.json();
+    if (data.error) { busy = false; return; }
+
+    gameState = data;
+
+    await dropPiece(data.human_row, col, 'p2');
+
+    if (data.ai_col !== null && data.ai_col !== undefined) {
+      await dropPiece(data.ai_row, data.ai_col, 'p1');
+    }
+
+    renderBoard(data.board);
+
+    if (data.done) {
+      highlightWinner(data.board, data.winner);
+      if (data.winner === -1)      setStatus('あなたの勝ち！');
+      else if (data.winner === 1)  setStatus('CPUの勝ち！');
+      else                         setStatus('引き分け！');
+    } else {
+      setArrows(data.valid_actions, true);
+      setStatus('あなたの番です（橙）');
+    }
+    busy = false;
+  }
+
+  document.querySelectorAll('.arrow-cell').forEach(a => {
+    a.addEventListener('click', () => makeMove(parseInt(a.dataset.col)));
+  });
+
+  document.getElementById('new-game-btn').addEventListener('click', newGame);
+
+  newGame();
+</script>
+</body>
+</html>
