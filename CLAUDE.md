@@ -42,18 +42,26 @@
 詳細は `4moku/CLAUDE.md` を参照。
 
 ### 3moku（Connect Three）
-TODO: 実装予定
+```bash
+# 学習
+.venv/Scripts/python 3moku/train.py --episodes 10000
+
+# WebUI
+.venv/Scripts/python 3moku/web/app.py
+```
+詳細は `3moku/CLAUDE.md` を参照。
 
 ### alphazero
 TODO: 実装予定
 
 ## 今後の方針（2026-03-19 策定）
 
-### ① 3moku: Connect Three（5×5盤面）でDQN学習
+### ① 3moku: Connect Three（5×5盤面）でDQN学習 — 進行中
 - **目的**: DQNが対戦ゲームでどこまで通用するかを確認する
 - **背景**: Connect Four（6×7, 4目）はDQN単体では限界があった（10ステージの試行錯誤で確認済み）。盤面を小さくし目標を3目に下げることで、DQN単体でも学習が成功する可能性が高い
 - **方針**: 4moku/のコードをベースに、盤面サイズとconnect数を変更。CNN + 中間報酬なしの方針は維持
-- **優先度**: 先にこちらから着手
+- **進捗**: DQNは簡易RuleBasedに100%勝利達成。ただし人間には負ける→RuleBasedを強化して再学習中
+- **重要な知見**: DQNの強さは対戦相手の強さに制約される。対戦相手を強化しなければDQNも強くならない
 
 ### ② alphazero: AlphaZero方式でConnect Four
 - **目的**: 最先端の手法（MCTS + ニューラルネット）への理解を深める
