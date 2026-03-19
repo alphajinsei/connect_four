@@ -41,9 +41,10 @@ from agents.rule_based_agent import RuleBasedAgent
 from agents.noisy_rule_based_agent import NoisyRuleBasedAgent
 from game_runner import GameRunner
 
-WEIGHTS_PATH  = "weights/dqn_connect4"
-SNAPSHOTS_DIR = "weights/snapshots"
-LOG_PATH      = "weights/train_log.txt"
+_SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS_PATH  = os.path.join(_SCRIPT_DIR, "weights", "dqn_connect4")
+SNAPSHOTS_DIR = os.path.join(_SCRIPT_DIR, "weights", "snapshots")
+LOG_PATH      = os.path.join(_SCRIPT_DIR, "weights", "train_log.txt")
 
 # カリキュラム定義: (noise, 目標勝率%)
 CURRICULUM = [

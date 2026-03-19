@@ -14,7 +14,8 @@ from env.connect4_env import Connect4Env
 from agents.random_agent import RandomAgent
 from agents.dqn_agent import DQNAgent
 
-WEIGHTS_PATH = "weights/dqn_connect4.pt"
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEIGHTS_PATH = os.path.join(_APP_DIR, "weights", "dqn_connect4.pt")
 
 
 def make_opponent():
