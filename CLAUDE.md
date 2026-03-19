@@ -18,7 +18,7 @@
 │   ├── train.py        ← 学習スクリプト
 │   └── ...
 ├── 3moku/              ← Connect Three（5×5盤面、3目並べ）DQN学習【新規予定】
-├── alphazero/          ← AlphaZero方式の実装【新規予定】
+├── alphazero/          ← AlphaZero方式（MCTS+NN）でConnect Four
 └── CLAUDE.md           ← このファイル（横断）
 ```
 
@@ -51,8 +51,21 @@
 ```
 詳細は `3moku/CLAUDE.md` を参照。
 
-### alphazero
-TODO: 実装予定
+### alphazero（AlphaZero Connect Four）
+```bash
+# 学習（CPU環境向け軽量設定、100イテレーション）
+.venv/Scripts/python alphazero/train.py
+
+# カスタム設定
+.venv/Scripts/python alphazero/train.py --iterations 50 --games-per-iter 10 --num-simulations 50
+
+# 学習済みモデルから再開
+.venv/Scripts/python alphazero/train.py --load alphazero/weights/alphazero_latest.pt
+
+# WebUI（ポート5001）
+.venv/Scripts/python alphazero/web/app.py
+```
+詳細は `alphazero/CLAUDE.md` を参照。
 
 ## 今後の方針（2026-03-19 策定）
 
@@ -63,11 +76,13 @@ TODO: 実装予定
 - **進捗**: DQNは簡易RuleBasedに100%勝利達成。ただし人間には負ける→RuleBasedを強化して再学習中
 - **重要な知見**: DQNの強さは対戦相手の強さに制約される。対戦相手を強化しなければDQNも強くならない
 
-### ② alphazero: AlphaZero方式でConnect Four
+### ② alphazero: AlphaZero方式でConnect Four — 実装完了、本格学習開始
 - **目的**: 最先端の手法（MCTS + ニューラルネット）への理解を深める
 - **背景**: DQNの限界（マルコフ性、単一方策）を体感した上で、AlphaZeroがなぜそれを解決できるかを学ぶ
-- **方針**: Connect Four（6×7, 4目）をAlphaZero方式で実装。軽量版（シミュレーション50回/手、数千ゲーム）でCPU環境でも数時間で学習可能な見込み
-- **優先度**: ①の後に着手。まず理論の理解から始める
+- **方針**: Connect Four（6×7, 4目）をAlphaZero方式で実装。軽量版（シミュレーション50回/手）でCPU環境でも学習可能
+- **進捗**: 実装完了（env, network, mcts, self_play, train, web）。短縮テスト（3イテレーション）で動作確認済み。100イテレーションの本格学習はこれから
+- **DQNとの対比**: `alphazero/CLAUDE.md` にDQNの3つの限界とAlphaZeroの解決策を詳述
+- **パラメータ数**: 301,402（4moku DQN CNN-Aの710Kより少ない。残差ブロック4層+64チャンネルの軽量設計）
 
 ### 学びの流れ
 ```
