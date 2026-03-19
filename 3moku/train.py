@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from env.connect3_env import Connect3Env
 from agents.dqn_agent import DQNAgent
 from agents.rule_based_agent import RuleBasedAgent
+from agents.random_agent import RandomAgent
 from game_runner import GameRunner
 
 _SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -73,8 +74,8 @@ def make_agent(**kwargs):
     return DQNAgent(**defaults)
 
 
-def eval_vs_rulebased(agent, env, n=200):
-    runner        = GameRunner(env, agent, RuleBasedAgent(), renderer=None)
+def eval_vs(agent, env, opponent, n=200):
+    runner        = GameRunner(env, agent, opponent, renderer=None)
     saved_eps     = agent.epsilon
     agent.epsilon = 0.0
     wins = sum(
@@ -87,8 +88,8 @@ def eval_vs_rulebased(agent, env, n=200):
 
 def print_header():
     print(f"\n=== vs RuleBased 直接対戦学習 ===")
-    print(f"{'Episode':>8} | {'勝率(直近1000)':>15} | {'平均報酬':>10} | {'ε':>7} | {'vs RuleBased(200)':>18}")
-    print("-" * 72)
+    print(f"{'Episode':>8} | {'勝率(直近1000)':>15} | {'平均報酬':>10} | {'ε':>7} | {'vs RuleBased':>13} | {'vs Random':>10}")
+    print("-" * 85)
 
 
 def train(num_episodes=30000, eval_interval=500, load_path=None, no_buffer=False):
@@ -146,15 +147,18 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, no_buffer=False
         if episode % eval_interval == 0:
             win_rate   = np.mean(win_history[-1000:]) * 100
             avg_reward = np.mean(reward_history[-1000:])
-            vs_rb      = eval_vs_rulebased(agent, env, n=EVAL_N)
+            vs_rb      = eval_vs(agent, env, RuleBasedAgent(), n=EVAL_N)
+            vs_rand    = eval_vs(agent, env, RandomAgent(), n=EVAL_N)
 
-            print(f"{episode:>8} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rb:>17.1f}%")
+            print(f"{episode:>8} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rb:>12.1f}% | {vs_rand:>9.1f}%")
 
-            if vs_rb > best_vs_rb:
-                best_vs_rb = vs_rb
-                best_path  = os.path.join(SNAPSHOTS_DIR, f"best_ep{episode}_rb{vs_rb:.0f}pct_{session_ts}")
-                agent.save(best_path)
-                print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {best_path}.pt")
+            # vs RuleBased がベスト更新 or 100%のとき毎回スナップショット保存
+            if vs_rb > best_vs_rb or vs_rb >= 100.0:
+                if vs_rb > best_vs_rb:
+                    best_vs_rb = vs_rb
+                snap_path = os.path.join(SNAPSHOTS_DIR, f"ep{episode}_rb{vs_rb:.0f}_rand{vs_rand:.0f}pct_{session_ts}")
+                agent.save(snap_path)
+                print(f"  [Snap] vs RB {vs_rb:.1f}% / vs Rand {vs_rand:.1f}% → {snap_path}.pt")
 
     print("\n学習完了")
     agent.save_checkpoint(WEIGHTS_PATH)
