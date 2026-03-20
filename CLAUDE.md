@@ -53,14 +53,11 @@
 
 ### alphazero（AlphaZero Connect Four）
 ```bash
-# 学習（CPU環境向け軽量設定、100イテレーション）
-.venv/Scripts/python alphazero/train.py
+# 学習（推奨設定）
+.venv/Scripts/python alphazero/train.py --iterations 100 --games-per-iter 200 --train-steps 100
 
-# カスタム設定
-.venv/Scripts/python alphazero/train.py --iterations 50 --games-per-iter 10 --num-simulations 50
-
-# 学習済みモデルから再開
-.venv/Scripts/python alphazero/train.py --load alphazero/weights/alphazero_latest.pt
+# 途中から再開（PCスリープ等で止まった場合）
+.venv/Scripts/python alphazero/train.py --resume --iterations 100 --games-per-iter 200 --train-steps 100 --eval-interval 5
 
 # WebUI（ポート5001）
 .venv/Scripts/python alphazero/web/app.py
@@ -78,13 +75,16 @@
   - DQNの強さは対戦相手の強さに制約される。対戦相手を強化しなければDQNも強くならない
   - 評価指標は複数持つべき（vs RuleBased + vs Random）。単一指標100%は汎化性能を保証しない
 
-### ② alphazero: AlphaZero方式でConnect Four — 実装完了、本格学習開始
+### ② alphazero: AlphaZero方式でConnect Four — ステージ2学習中
 - **目的**: 最先端の手法（MCTS + ニューラルネット）への理解を深める
 - **背景**: DQNの限界（マルコフ性、単一方策）を体感した上で、AlphaZeroがなぜそれを解決できるかを学ぶ
 - **方針**: Connect Four（6×7, 4目）をAlphaZero方式で実装。軽量版（シミュレーション50回/手）でCPU環境でも学習可能
-- **進捗**: 実装完了（env, network, mcts, self_play, train, web）。短縮テスト（3イテレーション）で動作確認済み。100イテレーションの本格学習はこれから
-- **DQNとの対比**: `alphazero/CLAUDE.md` にDQNの3つの限界とAlphaZeroの解決策を詳述
 - **パラメータ数**: 301,402（4moku DQN CNN-Aの710Kより少ない。残差ブロック4層+64チャンネルの軽量設計）
+- **DQNとの対比**: `alphazero/CLAUDE.md` にDQNの3つの限界とAlphaZeroの解決策を詳述
+- **進捗**:
+  - ステージ1（games=10, steps=10）: 100iter完走したが vs Random 23%, vs RuleBased 0% で失敗。データ量不足が原因
+  - ステージ2（games=200, steps=100）: パラメータ20倍増で再挑戦中。チェックポイント機能追加（`--resume`で途中再開可能）
+- **重要な知見**: AlphaZeroの正のフィードバックループを回すには、1イテレーションあたりのデータ量に臨界量がある。10ゲーム/iterでは不足
 
 ### 学びの流れ
 ```

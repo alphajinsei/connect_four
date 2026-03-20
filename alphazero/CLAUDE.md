@@ -280,6 +280,64 @@ Iter 60-100: 攻防バランス → vs RuleBased 30-60%（期待）
 
 ---
 
+## 学習ログ
+
+### ステージ1: 初期設定での100イテレーション（2026-03-20）
+
+**設定**: games-per-iter=10, train-steps=10, num-simulations=50, batch-size=128
+
+**結果**:
+```
+Iter  1: vs Random  3.3%, vs RuleBased 0.0%
+Iter 50: vs Random 20.0%, vs RuleBased 0.0%
+Iter100: vs Random 23.3%, vs RuleBased 0.0%（100イテレーション通して1勝もなし）
+P-Loss: 1.67 → 1.41（改善）
+V-Loss: 0.29 → 0.43（悪化）
+```
+
+**問題**: vs Random 23%止まり、vs RuleBased 0%。P-Lossは下がる（NNはMCTSの手を模倣できるようになった）が、肝心のMCTSの探索自体がNNの弱さに引きずられ、質の低いデータしか生成できない。正のフィードバックループが回っていない。
+
+**原因分析**:
+1. **データ多様性不足**: 10ゲーム/iter × 約35手 = 約350手/iter。Connect Fourの局面空間（~10^12）に対してあまりに少ない。本家AlphaZeroは25,000ゲーム/iterで2,500倍の差
+2. **学習不足**: train-steps=10 × batch-size=128 = 1,280手/iter しか学習しない。バッファに35,000手あるのに3.7%しか使っていない
+3. **V-Lossの悪化**: 少ないデータで勝率予測を学ぼうとするが、パターンが偏りすぎて汎化できない
+
+**教訓**: AlphaZeroの正のフィードバックループ（NN改善→MCTS改善→良いデータ→NN改善）を回すには、1イテレーションあたりのデータ量が臨界量を超える必要がある。10ゲーム/iterはその閾値を下回っていた。
+
+---
+
+### ステージ2: パラメータ増強（2026-03-20〜、進行中）
+
+**変更**: games-per-iter=10→**200**（20倍）、train-steps=10→**100**（10倍）
+
+**変更の理由**:
+- games-per-iter=200: 200ゲーム × 35手 = 7,000手/iter。多様な局面をNNに見せ、正のフィードバックループを回す
+- train-steps=100: 128 × 100 = 12,800手/iter を学習。バッファのデータを十分活用する
+
+**期待**: vs Random 70-90%、vs RuleBased 10-30%。DQNのベスト（vs RuleBased 16%）超えが目標。
+
+**所要時間**: 1イテレーション約20-25分、100イテレーションで約35-40時間
+
+**インフラ改善**: チェックポイント機能を追加。5イテレーションごとにNN重み・optimizer状態・バッファを丸ごと保存。`--resume`で途中再開可能（PCスリープ対策）。
+
+---
+
+## 実行方法（更新）
+
+```bash
+# 新規学習
+.venv/Scripts/python alphazero/train.py --iterations 100 --games-per-iter 200 --train-steps 100
+
+# 途中から再開（チェックポイントから自動復元）
+.venv/Scripts/python alphazero/train.py --resume --iterations 100 --games-per-iter 200 --train-steps 100 --eval-interval 5
+
+# WebUI
+.venv/Scripts/python alphazero/web/app.py
+# ブラウザで http://localhost:5001 を開く
+```
+
+---
+
 ## 参考: なぜSelf-playが安定するのか
 
 DQNのself-play（ステージ3）は崩壊した。AlphaZeroでは安定する理由:

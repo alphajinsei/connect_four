@@ -31,14 +31,20 @@ CPU環境向けの軽量設定:
   - 学習イテレーション 100回で数時間を目標
 
 使い方:
-    .venv/Scripts/python alphazero/train.py
-    .venv/Scripts/python alphazero/train.py --iterations 50 --games-per-iter 10
-    .venv/Scripts/python alphazero/train.py --load weights/alphazero_latest.pt
+    # 新規学習
+    .venv/Scripts/python alphazero/train.py --iterations 100
+
+    # 途中から再開（チェックポイントから自動復元）
+    .venv/Scripts/python alphazero/train.py --resume
+
+    # パラメータを変えて再開（イテレーション番号はチェックポイントから復元）
+    .venv/Scripts/python alphazero/train.py --resume --iterations 200 --games-per-iter 50
 """
 import sys
 import os
 import argparse
 import time
+import json
 from datetime import datetime
 import numpy as np
 import torch
@@ -56,21 +62,22 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEIGHTS_DIR = os.path.join(_SCRIPT_DIR, "weights")
 SNAPSHOTS_DIR = os.path.join(WEIGHTS_DIR, "snapshots")
 LOG_PATH = os.path.join(WEIGHTS_DIR, "train_log.txt")
+CHECKPOINT_PATH = os.path.join(WEIGHTS_DIR, "checkpoint.pt")
 
 
 class Tee:
     """stdout とファイルに同時に書き出す"""
-    def __init__(self, path):
+    def __init__(self, path, mode="w"):
         self._path = path
         self._stdout = sys.stdout
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, mode, encoding="utf-8") as f:
             pass
 
     def write(self, data):
         try:
             self._stdout.write(data)
         except UnicodeEncodeError:
-            self._stdout.write(data.encode('utf-8', errors='replace').decode('utf-8'))
+            self._stdout.write(data.encode(self._stdout.encoding or 'ascii', errors='replace').decode(self._stdout.encoding or 'ascii'))
         with open(self._path, "a", encoding="utf-8") as f:
             f.write(data)
             f.flush()
@@ -118,8 +125,51 @@ class ReplayBuffer:
             np.array([self.values[i] for i in indices], dtype=np.float32),
         )
 
+    def get_state(self):
+        """バッファの内容をシリアライズ可能な形式で返す"""
+        return {
+            'states': self.states,
+            'policies': self.policies,
+            'values': self.values,
+        }
+
+    def load_state(self, state):
+        """シリアライズされた状態からバッファを復元"""
+        self.states = state['states']
+        self.policies = state['policies']
+        self.values = state['values']
+
     def __len__(self):
         return len(self.states)
+
+
+def save_checkpoint(network, optimizer, buffer, iteration, best_vs_rb, session_ts):
+    """学習状態を丸ごと保存（PC停止からの復帰用）"""
+    checkpoint = {
+        'iteration': iteration,
+        'network_state': network.state_dict(),
+        'optimizer_state': optimizer.state_dict(),
+        'buffer_state': buffer.get_state(),
+        'best_vs_rb': best_vs_rb,
+        'session_ts': session_ts,
+    }
+    # 一時ファイルに書いてからリネーム（書き込み中の破損防止）
+    tmp_path = CHECKPOINT_PATH + ".tmp"
+    torch.save(checkpoint, tmp_path)
+    if os.path.exists(CHECKPOINT_PATH):
+        os.remove(CHECKPOINT_PATH)
+    os.rename(tmp_path, CHECKPOINT_PATH)
+
+
+def load_checkpoint(network, optimizer, buffer):
+    """チェックポイントから学習状態を復元"""
+    if not os.path.exists(CHECKPOINT_PATH):
+        return None
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu', weights_only=False)
+    network.load_state_dict(checkpoint['network_state'])
+    optimizer.load_state_dict(checkpoint['optimizer_state'])
+    buffer.load_state(checkpoint['buffer_state'])
+    return checkpoint
 
 
 def train_network(network, optimizer, buffer, batch_size=128, train_steps=10):
@@ -242,47 +292,70 @@ def eval_vs_random(network, num_games=50, num_simulations=50):
 
 def train(iterations=100, games_per_iter=10, num_simulations=50,
           eval_interval=5, batch_size=128, train_steps=10,
-          lr=1e-3, load_path=None):
+          lr=1e-3, load_path=None, resume=False):
     os.makedirs(WEIGHTS_DIR, exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
     session_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    tee = Tee(LOG_PATH)
-    sys.stdout = tee
-
-    print("=" * 70)
-    print("AlphaZero Connect Four — 学習開始")
-    print("=" * 70)
-    print(f"イテレーション数: {iterations}")
-    print(f"self-playゲーム数/イテレーション: {games_per_iter}")
-    print(f"MCTSシミュレーション数: {num_simulations}")
-    print(f"学習ステップ/イテレーション: {train_steps}")
-    print(f"バッチサイズ: {batch_size}")
-    print(f"学習率: {lr}")
-    print()
-
-    # ネットワーク
+    # ネットワーク・オプティマイザ・バッファを初期化
     network = AlphaZeroNet(num_res_blocks=4, channels=64)
-    if load_path:
-        network.load_state_dict(torch.load(load_path, map_location='cpu', weights_only=True))
-        print(f"重みをロード: {load_path}")
-    else:
-        print("新規学習（ランダム初期化）")
-
-    param_count = sum(p.numel() for p in network.parameters())
-    print(f"パラメータ数: {param_count:,}")
-    print()
-
     optimizer = optim.Adam(network.parameters(), lr=lr, weight_decay=1e-4)
     buffer = ReplayBuffer(max_size=50000)
-
     best_vs_rb = 0.0
+    start_iteration = 1
+
+    # 再開モード: チェックポイントから全状態を復元
+    if resume:
+        checkpoint = load_checkpoint(network, optimizer, buffer)
+        if checkpoint:
+            start_iteration = checkpoint['iteration'] + 1
+            best_vs_rb = checkpoint['best_vs_rb']
+            session_ts = checkpoint['session_ts']
+
+            # ログは追記モード
+            tee = Tee(LOG_PATH, mode="a")
+            sys.stdout = tee
+
+            print()
+            print(f"=== 再開: イテレーション {start_iteration} から (バッファ: {len(buffer)}手) ===")
+            print(f"パラメータ変更: games-per-iter={games_per_iter}, train-steps={train_steps}")
+            print()
+        else:
+            print("チェックポイントが見つかりません。新規学習を開始します。")
+            resume = False
+
+    if not resume:
+        # 新規学習 or --load からの開始
+        if load_path:
+            network.load_state_dict(torch.load(load_path, map_location='cpu', weights_only=True))
+
+        tee = Tee(LOG_PATH, mode="w")
+        sys.stdout = tee
+
+        print("=" * 70)
+        print("AlphaZero Connect Four -- 学習開始")
+        print("=" * 70)
+        print(f"イテレーション数: {iterations}")
+        print(f"self-playゲーム数/イテレーション: {games_per_iter}")
+        print(f"MCTSシミュレーション数: {num_simulations}")
+        print(f"学習ステップ/イテレーション: {train_steps}")
+        print(f"バッチサイズ: {batch_size}")
+        print(f"学習率: {lr}")
+        print()
+        if load_path:
+            print(f"重みをロード: {load_path}")
+        else:
+            print("新規学習（ランダム初期化）")
+
+        param_count = sum(p.numel() for p in network.parameters())
+        print(f"パラメータ数: {param_count:,}")
+        print()
 
     print(f"{'Iter':>5} | {'Self-Play':>10} | {'Buffer':>7} | {'Loss':>8} | {'V-Loss':>8} | {'P-Loss':>8} | {'vs Random':>10} | {'vs RuleBased':>13} | {'Time':>8}")
     print("-" * 105)
 
-    for iteration in range(1, iterations + 1):
+    for iteration in range(start_iteration, iterations + 1):
         iter_start = time.time()
 
         # === 1. Self-play: MCTSで自分自身と対戦、学習データを生成 ===
@@ -309,7 +382,7 @@ def train(iterations=100, games_per_iter=10, num_simulations=50,
         iter_time = time.time() - iter_start
 
         # === 3. 評価 ===
-        if iteration % eval_interval == 0 or iteration == 1:
+        if iteration % eval_interval == 0 or iteration == start_iteration:
             network.eval()
             vs_random = eval_vs_random(network, num_games=30, num_simulations=num_simulations)
             vs_rb, vs_rb_draw = eval_vs_rulebased(network, num_games=30, num_simulations=num_simulations)
@@ -320,18 +393,20 @@ def train(iterations=100, games_per_iter=10, num_simulations=50,
                 best_vs_rb = vs_rb
                 snap_path = os.path.join(SNAPSHOTS_DIR, f"best_iter{iteration}_rb{vs_rb:.0f}pct_{session_ts}.pt")
                 torch.save(network.state_dict(), snap_path)
-                print(f"  [Best] vs RuleBased {vs_rb:.1f}% → {snap_path}")
+                print(f"  [Best] vs RuleBased {vs_rb:.1f}% -> {snap_path}")
         else:
             print(f"{iteration:>5} | {sp_summary:>10} | {len(buffer):>7} | {loss:>8.4f} | {v_loss:>8.4f} | {p_loss:>8.4f} | {'---':>10} | {'---':>13} | {iter_time:>7.1f}s")
 
-        # 定期保存
-        if iteration % 10 == 0:
+        # === 4. チェックポイント保存（5イテレーションごと + 最新重み） ===
+        if iteration % 5 == 0:
+            save_checkpoint(network, optimizer, buffer, iteration, best_vs_rb, session_ts)
             save_path = os.path.join(WEIGHTS_DIR, "alphazero_latest.pt")
             torch.save(network.state_dict(), save_path)
 
     # 最終保存
     final_path = os.path.join(WEIGHTS_DIR, "alphazero_latest.pt")
     torch.save(network.state_dict(), final_path)
+    save_checkpoint(network, optimizer, buffer, iterations, best_vs_rb, session_ts)
     print(f"\n学習完了。重みを保存: {final_path}")
     print(f"vs RuleBased ベスト: {best_vs_rb:.1f}%")
 
@@ -357,7 +432,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="学習率 (default: 1e-3)")
     parser.add_argument("--load", type=str, default=None,
-                        help="学習済み重みのパス")
+                        help="学習済み重みのパス（新規学習時のみ）")
+    parser.add_argument("--resume", action="store_true",
+                        help="チェックポイントから学習を再開")
     args = parser.parse_args()
 
     train(
@@ -369,4 +446,5 @@ if __name__ == "__main__":
         train_steps=args.train_steps,
         lr=args.lr,
         load_path=args.load,
+        resume=args.resume,
     )
