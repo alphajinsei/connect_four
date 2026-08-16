@@ -1,3 +1,5 @@
+import random
+
 from env.connect3_env import Connect3Env
 
 
@@ -15,8 +17,39 @@ class GameRunner:
         }
         self.renderer = renderer
 
-    def run_episode(self):
+    def _random_opening(self, max_plies):
+        """
+        空盤面からランダムな合法手を 0〜max_plies 手打ち、開始局面を散らす。
+
+        訪問局面を広げるのが目的。実測では max_plies=4 まで開幕直後に終局する
+        ことはないが（k=5 で 10.5%、k=6 で 14.9%）、念のため終局したらリセット
+        してやり直す。手番は必ず PLAYER1 に戻す（DQN は先手固定で学習するため、
+        偶数手だけ打つ）。
+
+        開幕手は env に直接打ち込み、on_step_end を呼ばない。ランダムな手を
+        「エージェントが選んだ手」として学習させないため。
+        """
+        if max_plies <= 0:
+            return
+
+        for _ in range(20):  # 終局してしまったらやり直す
+            # PLAYER1 の手番を保つため偶数手のみ
+            plies = random.randrange(0, max_plies + 1, 2)
+            if plies == 0:
+                return
+            self.env.reset()
+            for _ in range(plies):
+                self.env.step(random.choice(self.env.get_valid_actions()))
+                if self.env.done:
+                    break
+            if not self.env.done:
+                return
+        # 20回試して全部終局した場合は空盤面で開始
+        self.env.reset()
+
+    def run_episode(self, random_opening_plies=0):
         state = self.env.reset()
+        self._random_opening(random_opening_plies)
         for agent in self.agents.values():
             agent.on_episode_start()
 
@@ -25,6 +58,7 @@ class GameRunner:
 
         total_rewards = {Connect3Env.PLAYER1: 0.0, Connect3Env.PLAYER2: 0.0}
         steps = 0
+        p1_states = []  # PLAYER1 が実際に手を選んだ局面（訪問局面数の計測用）
 
         pending = {
             Connect3Env.PLAYER1: None,
@@ -35,6 +69,9 @@ class GameRunner:
             current_player = self.env.current_player
             agent = self.agents[current_player]
             valid_actions = self.env.get_valid_actions()
+
+            if current_player == Connect3Env.PLAYER1:
+                p1_states.append(self.env.board.tobytes())
 
             agent_state = self.env.get_state(perspective=current_player)
 
@@ -92,4 +129,5 @@ class GameRunner:
             "steps": steps,
             "reward_p1": total_rewards[Connect3Env.PLAYER1],
             "reward_p2": total_rewards[Connect3Env.PLAYER2],
+            "p1_states": p1_states,
         }

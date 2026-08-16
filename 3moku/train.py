@@ -3,9 +3,22 @@ train.py — DQN エージェントの学習スクリプト（Connect Three: 5×
 
 設計方針:
   - DQN は常に PLAYER1（先手）として学習
-  - 対戦相手は RuleBasedAgent（完全ルールベース）
+  - 対戦相手は StochasticRuleBasedAgent（確率的ルールベース）
   - カリキュラムなし: 最初から強い相手と対戦して学習
   - 報酬は勝敗（±1.0）のみ。CNN が空間パターンを認識するため中間報酬は不要
+  - **ランダム初期局面 + 確率的相手で訪問局面を広げる**（Stage 5 で導入）
+
+Stage 5 の背景:
+    学習済み DQN を決定論的 RuleBased と300回対戦させたところ、棋譜は2通り、
+    DQN が遭遇する盤面はわずか11種類しかなかった（状態空間 ~6×10^6 の 0.0002%）。
+    vs RuleBased 100% は「11局面の暗記テストで満点」を意味するに過ぎず、
+    人間の変則手に対応できない構造的原因だった。
+
+    実測した対策効果（500ゲームで DQN が遭遇する異なる盤面数）:
+        ベースライン（決定論 RB, 開幕なし）    :  11
+        ランダム初期局面 k<=4 のみ             : 413
+        確率的 RB (noise=0.15) のみ            : 108
+        両方                                   : 596
 
 使い方:
     # ゼロから学習
@@ -13,6 +26,9 @@ train.py — DQN エージェントの学習スクリプト（Connect Three: 5×
 
     # 学習済み重みから続き
     .venv/Scripts/python 3moku/train.py --load-path weights/dqn_connect3 --episodes 30000
+
+    # Stage 4 以前の挙動を再現（比較用）
+    .venv/Scripts/python 3moku/train.py --opening-plies 0 --opponent-noise 0.0
 """
 import sys
 import os
@@ -25,6 +41,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from env.connect3_env import Connect3Env
 from agents.dqn_agent import DQNAgent
 from agents.rule_based_agent import RuleBasedAgent
+from agents.stochastic_rule_based_agent import StochasticRuleBasedAgent
 from agents.random_agent import RandomAgent
 from game_runner import GameRunner
 
@@ -74,25 +91,37 @@ def make_agent(**kwargs):
     return DQNAgent(**defaults)
 
 
-def eval_vs(agent, env, opponent, n=200):
+def eval_vs(agent, env, opponent, n=200, opening_plies=0):
+    """
+    ε=0 の純粋推論で opponent と n 戦し、勝率(%)と訪問局面集合を返す。
+
+    opening_plies > 0 なら毎回ランダム初期局面から開始する。これが汎化性能の
+    本命指標: 決定論的な開幕からの勝率は「暗記した1本道」の再現に過ぎない。
+    """
     runner        = GameRunner(env, agent, opponent, renderer=None)
     saved_eps     = agent.epsilon
     agent.epsilon = 0.0
-    wins = sum(
-        1 for _ in range(n)
-        if runner.run_episode()["winner"] == Connect3Env.PLAYER1
-    )
+    wins  = 0
+    seen  = set()
+    for _ in range(n):
+        stats = runner.run_episode(random_opening_plies=opening_plies)
+        if stats["winner"] == Connect3Env.PLAYER1:
+            wins += 1
+        seen.update(stats["p1_states"])
     agent.epsilon = saved_eps
-    return wins / n * 100
+    return wins / n * 100, seen
 
 
-def print_header():
-    print(f"\n=== vs RuleBased 直接対戦学習 ===")
-    print(f"{'Episode':>8} | {'勝率(直近1000)':>15} | {'平均報酬':>10} | {'ε':>7} | {'vs RuleBased':>13} | {'vs Random':>10}")
-    print("-" * 85)
+def print_header(opening_plies, opponent_noise):
+    print(f"\n=== vs 確率的RuleBased 直接対戦学習 "
+          f"(開幕ランダム≤{opening_plies}手, 相手noise={opponent_noise}) ===")
+    print(f"{'Episode':>8} | {'勝率(直近1000)':>13} | {'平均報酬':>9} | {'ε':>7} | "
+          f"{'vs RB(固定)':>11} | {'vs RB(乱開幕)':>13} | {'vs Random':>9} | {'訪問局面':>8}")
+    print("-" * 115)
 
 
-def train(num_episodes=30000, eval_interval=500, load_path=None, no_buffer=False):
+def train(num_episodes=30000, eval_interval=500, load_path=None, no_buffer=False,
+          opening_plies=4, opponent_noise=0.15):
     os.makedirs(os.path.join(_SCRIPT_DIR, "weights"), exist_ok=True)
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -129,41 +158,54 @@ def train(num_episodes=30000, eval_interval=500, load_path=None, no_buffer=False
         print("新規学習開始（Connect Three: 5×5盤面、3目並べ、CNN + vs RuleBased直接対戦 + PyTorch）")
 
     print(f"ハイパーパラメータ: lr=5e-4, epsilon_end=0.10, target_update=500, buffer=20000")
-    print(f"対戦相手: RuleBasedAgent（完全ルールベース）")
+    print(f"対戦相手: StochasticRuleBasedAgent(noise={opponent_noise})")
+    print(f"開幕ランダム: 0〜{opening_plies}手（偶数手のみ、DQNは先手を維持）")
     print()
 
     win_history    = []
     reward_history = []
-    best_vs_rb     = 0.0
+    best_vs_open   = 0.0   # 主指標: ランダム開幕からの vs RuleBased 勝率
+    train_states   = set() # 学習中に DQN が遭遇した異なる盤面（累積）
 
-    opp = RuleBasedAgent()
-    print_header()
+    opp = StochasticRuleBasedAgent(noise=opponent_noise)
+    print_header(opening_plies, opponent_noise)
 
     for episode in range(1, num_episodes + 1):
-        stats = GameRunner(env, agent, opp, renderer=None).run_episode()
+        stats = GameRunner(env, agent, opp, renderer=None).run_episode(
+            random_opening_plies=opening_plies
+        )
         win_history.append(1 if stats["winner"] == Connect3Env.PLAYER1 else 0)
         reward_history.append(stats["reward_p1"])
+        train_states.update(stats["p1_states"])
 
         if episode % eval_interval == 0:
             win_rate   = np.mean(win_history[-1000:]) * 100
             avg_reward = np.mean(reward_history[-1000:])
-            vs_rb      = eval_vs(agent, env, RuleBasedAgent(), n=EVAL_N)
-            vs_rand    = eval_vs(agent, env, RandomAgent(), n=EVAL_N)
+            # 従来指標（Stage 4 との比較用。決定論的な1本道なので過大評価される）
+            vs_rb,   _ = eval_vs(agent, env, RuleBasedAgent(), n=EVAL_N)
+            # 主指標: ランダム開幕からの勝率 = 汎化性能
+            vs_open, _ = eval_vs(agent, env, RuleBasedAgent(), n=EVAL_N,
+                                 opening_plies=opening_plies)
+            vs_rand, _ = eval_vs(agent, env, RandomAgent(), n=EVAL_N)
 
-            print(f"{episode:>8} | {win_rate:>13.1f}% | {avg_reward:>10.3f} | {agent.epsilon:>7.5f} | {vs_rb:>12.1f}% | {vs_rand:>9.1f}%")
+            print(f"{episode:>8} | {win_rate:>12.1f}% | {avg_reward:>9.3f} | {agent.epsilon:>7.5f} | "
+                  f"{vs_rb:>10.1f}% | {vs_open:>12.1f}% | {vs_rand:>8.1f}% | {len(train_states):>8}")
 
-            # vs RuleBased がベスト更新 or 100%のとき毎回スナップショット保存
-            if vs_rb > best_vs_rb or vs_rb >= 100.0:
-                if vs_rb > best_vs_rb:
-                    best_vs_rb = vs_rb
-                snap_path = os.path.join(SNAPSHOTS_DIR, f"ep{episode}_rb{vs_rb:.0f}_rand{vs_rand:.0f}pct_{session_ts}")
+            # 主指標（ランダム開幕勝率）がベスト更新時にスナップショット保存
+            if vs_open > best_vs_open:
+                best_vs_open = vs_open
+                snap_path = os.path.join(
+                    SNAPSHOTS_DIR,
+                    f"ep{episode}_open{vs_open:.0f}_rb{vs_rb:.0f}_rand{vs_rand:.0f}pct_{session_ts}"
+                )
                 agent.save(snap_path)
-                print(f"  [Snap] vs RB {vs_rb:.1f}% / vs Rand {vs_rand:.1f}% → {snap_path}.pt")
+                print(f"  [Snap] 乱開幕 {vs_open:.1f}% / 固定RB {vs_rb:.1f}% / Rand {vs_rand:.1f}% → {snap_path}.pt")
 
     print("\n学習完了")
     agent.save_checkpoint(WEIGHTS_PATH)
     print(f"重み+チェックポイントを保存: {WEIGHTS_PATH}.pt / {WEIGHTS_PATH}_checkpoint.pt")
-    print(f"vs RuleBased ベスト: {best_vs_rb:.1f}%")
+    print(f"vs RuleBased(ランダム開幕) ベスト: {best_vs_open:.1f}%")
+    print(f"学習中に遭遇した異なる盤面: {len(train_states)}（Stage 4 は約11）")
 
     sys.stdout = tee._stdout
     tee.close()
@@ -178,6 +220,10 @@ if __name__ == "__main__":
                         help="学習済み重みから再開 例: weights/dqn_connect3")
     parser.add_argument("--no-buffer",     action="store_true",
                         help="ロード時にReplayBufferを引き継がない")
+    parser.add_argument("--opening-plies", type=int, default=4,
+                        help="開幕ランダム手数の上限（0でStage4以前の挙動）")
+    parser.add_argument("--opponent-noise", type=float, default=0.15,
+                        help="相手のランダム手混入率（0.0で決定論的RuleBased）")
     args = parser.parse_args()
 
     train(
@@ -185,4 +231,6 @@ if __name__ == "__main__":
         eval_interval=args.eval_interval,
         load_path=args.load_path,
         no_buffer=args.no_buffer,
+        opening_plies=args.opening_plies,
+        opponent_noise=args.opponent_noise,
     )
