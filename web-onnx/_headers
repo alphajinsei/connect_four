@@ -1,0 +1,14 @@
+# Cloudflare Pages のヘッダ設定
+# https://developers.cloudflare.com/pages/configuration/headers/
+
+# モデルは内容が変わらない限り同じなので長期キャッシュする。
+# 1.7MB の再ダウンロードを避けて2回目以降の起動を速くする。
+/model.onnx
+  Cache-Control: public, max-age=31536000, immutable
+
+/game.js
+  Cache-Control: public, max-age=3600
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect Three — 強化学習AIと対戦</title>
+  <meta name="description" content="DQN（Deep Q-Network）でゼロから学習させた3目並べAIとブラウザ上で対戦できます。推論はすべてブラウザ内で実行されます。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f3460'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23e94560'/%3E%3C/svg%3E">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, #e94560, #0f3460);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #status {
+      font-size: 1.1rem;
+      margin-bottom: 20px;
+      min-height: 1.6em;
+      color: #aad4f5;
+      font-weight: 600;
+    }
+
+    #board-wrapper {
+      background: #0f3460;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    #arrow-row {
+      display: grid;
+      grid-template-columns: repeat(5, 70px);
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .arrow-cell {
+      width: 70px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 1.2rem;
+      color: transparent;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .arrow-cell:hover { color: #e94560; background: rgba(255,255,255,0.08); }
+    .arrow-cell.blocked { cursor: default; }
+    .arrow-cell.blocked:hover { color: transparent; background: none; }
+
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(5, 70px);
+      grid-template-rows: repeat(5, 70px);
+      gap: 6px;
+    }
+
+    .cell {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: #1a1a2e;
+      transition: background 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cell.drop {
+      animation: drop-in 0.3s ease-out;
+    }
+
+    @keyframes drop-in {
+      from { transform: translateY(-300px); }
+      to   { transform: translateY(0); }
+    }
+
+    .cell.p1 { background: #e94560; box-shadow: 0 0 12px rgba(233,69,96,0.6); }
+    .cell.p2 { background: #f5a623; box-shadow: 0 0 12px rgba(245,166,35,0.6); }
+
+    .cell.winner-cell {
+      animation: pulse 0.8s ease-in-out infinite alternate;
+    }
+    @keyframes pulse {
+      from { box-shadow: 0 0 8px rgba(255,255,255,0.4); }
+      to   { box-shadow: 0 0 24px rgba(255,255,255,1); transform: scale(1.08); }
+    }
+
+    #new-game-btn {
+      margin-top: 24px;
+      padding: 12px 36px;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      border: none;
+      border-radius: 30px;
+      background: linear-gradient(135deg, #e94560, #0f3460);
+      color: white;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 4px 16px rgba(233,69,96,0.4);
+    }
+    #new-game-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(233,69,96,0.5); }
+    #new-game-btn:active { transform: translateY(0); }
+    #new-game-btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+    #legend {
+      display: flex;
+      gap: 24px;
+      margin-top: 20px;
+      font-size: 0.9rem;
+    }
+    .legend-item { display: flex; align-items: center; gap: 8px; }
+    .legend-dot {
+      width: 20px; height: 20px; border-radius: 50%;
+    }
+    .legend-dot.p1 { background: #e94560; }
+    .legend-dot.p2 { background: #f5a623; }
+
+    #about {
+      margin-top: 40px;
+      max-width: 640px;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      color: #b8c4d4;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      padding-top: 24px;
+    }
+    #about h2 {
+      font-size: 1.1rem;
+      color: #eee;
+      margin-bottom: 12px;
+    }
+    #about p { margin-bottom: 12px; }
+    #about a { color: #e94560; }
+    #about table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 0.85rem;
+    }
+    #about th, #about td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    #about th { color: #aad4f5; }
+    #about code {
+      background: rgba(255,255,255,0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Connect Three</h1>
+<div id="status">AIを読み込んでいます...</div>
+
+<div id="board-wrapper">
+  <div id="arrow-row">
+    <div class="arrow-cell blocked" data-col="0">▼</div>
+    <div class="arrow-cell blocked" data-col="1">▼</div>
+    <div class="arrow-cell blocked" data-col="2">▼</div>
+    <div class="arrow-cell blocked" data-col="3">▼</div>
+    <div class="arrow-cell blocked" data-col="4">▼</div>
+  </div>
+  <div id="grid"></div>
+</div>
+
+<button id="new-game-btn" disabled>New Game</button>
+
+<div id="legend">
+  <div class="legend-item">
+    <div class="legend-dot p1"></div>
+    <span>CPU (赤・先攻)</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot p2"></div>
+    <span>あなた (橙・後攻)</span>
+  </div>
+</div>
+
+<div id="about">
+  <h2>このAIについて</h2>
+  <p>
+    5×5盤面・重力あり（コネクトフォア型）の3目並べを、<strong>DQN（Deep Q-Network）</strong> で
+    ゼロから学習させたAIです。人間の棋譜は一切使わず、20,000回の対戦を通じて自力で戦い方を身につけました。
+  </p>
+  <p>
+    <strong>推論はすべてあなたのブラウザ内で実行されています。</strong>
+    サーバーには一切通信していません（ONNX Runtime Web + WebAssembly）。
+  </p>
+
+  <table>
+    <tr><th>手法</th><td>DQN（CNN + 経験再生 + ターゲットネットワーク）</td></tr>
+    <tr><th>パラメータ数</th><td>430,533</td></tr>
+    <tr><th>モデルサイズ</th><td>1.7 MB</td></tr>
+    <tr><th>学習量</th><td>20,000エピソード</td></tr>
+    <tr><th>報酬設計</th><td>勝敗のみ（±1.0、中間報酬なし）</td></tr>
+  </table>
+
+  <h2>学習の途中で見つけた落とし穴</h2>
+  <p>
+    このAIは一度<strong>失敗作</strong>でした。「対ルールベースAI 勝率100%」を達成したのに、
+    人間が対戦すると簡単に勝ててしまったのです。調べたところ、
+    <strong>300回対戦させても棋譜はわずか2通り、AIが遭遇した盤面は11種類だけ</strong>でした
+    （状態空間 約6×10<sup>6</sup> の 0.0002%）。
+  </p>
+  <p>
+    AIとルールベースAIの両方が決定論的だったため、対局が毎回ほぼ同じ1本道をなぞっていたのです。
+    「100%」の正体は実力ではなく、<strong>11局面の暗記テストで満点を取っただけ</strong>でした。
+  </p>
+  <p>
+    対策は「相手を強くする」ではなく「<strong>訪問する局面を広げる</strong>」こと。
+    開始局面をランダム化し、対戦相手にも15%のランダム性を混ぜたところ、
+    訪問局面は <code>11 → 4,477</code>（407倍）、汎化性能は <code>66.2% → 83.2%</code> に改善しました。
+  </p>
+  <p>
+    <strong>教訓: DQNの天井を決めるのは「相手の強さ」ではなく「相手が到達する局面の集合」。</strong>
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+<script src="game.js"></script>
+<script>
+  let env = null;
+  let agent = null;
+  let busy = false;
+
+  const grid = document.getElementById('grid');
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      grid.appendChild(cell);
+    }
+  }
+
+  function getCell(row, col) {
+    return grid.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+  }
+
+  function renderBoard(board) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = getCell(r, c);
+        const v = board[r][c];
+        cell.className = 'cell';
+        if (v === 1)  cell.classList.add('p1');
+        if (v === -1) cell.classList.add('p2');
+      }
+    }
+  }
+
+  function dropPiece(row, col, playerClass) {
+    return new Promise(resolve => {
+      const cell = getCell(row, col);
+      cell.className = `cell ${playerClass} drop`;
+      cell.addEventListener('animationend', () => {
+        cell.classList.remove('drop');
+        resolve();
+      }, { once: true });
+    });
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status').textContent = msg;
+  }
+
+  function setArrows(validActions, enabled) {
+    document.querySelectorAll('.arrow-cell').forEach(a => {
+      const col = parseInt(a.dataset.col);
+      if (!enabled || !validActions.includes(col)) {
+        a.classList.add('blocked');
+      } else {
+        a.classList.remove('blocked');
+      }
+    });
+  }
+
+  function highlightWinner(board, winner) {
+    if (!winner && winner !== 0) return;
+    const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (board[r][c] !== winner) continue;
+        for (const [dr, dc] of dirs) {
+          let line = [];
+          for (let i = 0; i < 3; i++) {
+            const nr = r + dr*i, nc = c + dc*i;
+            if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) break;
+            if (board[nr][nc] !== winner) break;
+            line.push([nr, nc]);
+          }
+          if (line.length === 3) {
+            line.forEach(([lr, lc]) => getCell(lr, lc).classList.add('winner-cell'));
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  /** AIに1手打たせる（旧バージョンではサーバーに問い合わせていた処理） */
+  async function aiMove() {
+    const state = env.getState(env.currentPlayer);
+    const col = await agent.getAction(state, env.getValidActions());
+    const row = env.applyGravity(col);
+    env.step(col);
+    return { col, row };
+  }
+
+  async function newGame() {
+    if (!agent) return;
+    busy = true;
+    setArrows([], false);
+
+    env.reset();
+    renderBoard(env.board);
+    setStatus('CPUが先手を打ちました...');
+
+    // DQNは先手(PLAYER1)固定で学習しているため、AIが先に1手打つ
+    const ai = await aiMove();
+    await dropPiece(ai.row, ai.col, 'p1');
+    renderBoard(env.board);
+
+    setArrows(env.getValidActions(), true);
+    setStatus('あなたの番です（橙）');
+    busy = false;
+  }
+
+  async function makeMove(col) {
+    if (busy || !env || env.done) return;
+    if (!env.getValidActions().includes(col)) return;
+    busy = true;
+    setArrows([], false);
+
+    const humanRow = env.applyGravity(col);
+    env.step(col);
+    await dropPiece(humanRow, col, 'p2');
+
+    if (!env.done) {
+      const ai = await aiMove();
+      await dropPiece(ai.row, ai.col, 'p1');
+    }
+
+    renderBoard(env.board);
+
+    if (env.done) {
+      highlightWinner(env.board, env.winner);
+      if (env.winner === -1)      setStatus('あなたの勝ち！');
+      else if (env.winner === 1)  setStatus('CPUの勝ち！');
+      else                        setStatus('引き分け！');
+    } else {
+      setArrows(env.getValidActions(), true);
+      setStatus('あなたの番です（橙）');
+    }
+    busy = false;
+  }
+
+  document.querySelectorAll('.arrow-cell').forEach(a => {
+    a.addEventListener('click', () => makeMove(parseInt(a.dataset.col)));
+  });
+
+  document.getElementById('new-game-btn').addEventListener('click', newGame);
+
+  (async () => {
+    try {
+      env = new Connect3Env();
+      agent = await DQNAgent.create('model.onnx');
+      document.getElementById('new-game-btn').disabled = false;
+      await newGame();
+    } catch (e) {
+      console.error(e);
+      setStatus('AIの読み込みに失敗しました: ' + e.message);
+    }
+  })();
+</script>
+</body>
+</html>
