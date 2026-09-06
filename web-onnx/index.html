@@ -61,6 +61,11 @@
       margin-bottom: 6px;
     }
 
+    /*
+     * 打てる列は常時うっすら見せておく（初見の人に「ここを押す」と伝えるため）。
+     * ホバーで濃くなり、押そうとしている列が分かる。
+     * .blocked は「満杯の列」と「AIの手番で操作不可」の両方に付く。
+     */
     .arrow-cell {
       width: 70px;
       height: 28px;
@@ -70,13 +75,23 @@
       cursor: pointer;
       border-radius: 8px;
       font-size: 1.2rem;
-      color: transparent;
-      transition: color 0.15s, background 0.15s;
+      color: rgba(233,69,96,0.45);
+      background: rgba(255,255,255,0.04);
+      transition: color 0.15s, background 0.15s, transform 0.15s;
     }
 
-    .arrow-cell:hover { color: #e94560; background: rgba(255,255,255,0.08); }
-    .arrow-cell.blocked { cursor: default; }
-    .arrow-cell.blocked:hover { color: transparent; background: none; }
+    .arrow-cell:hover {
+      color: #e94560;
+      background: rgba(255,255,255,0.12);
+      transform: translateY(2px);
+    }
+
+    #arrow-row .arrow-cell.blocked {
+      cursor: default;
+      color: transparent;
+      background: none;
+      transform: none;
+    }
 
     #grid {
       display: grid;
