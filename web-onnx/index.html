@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Connect Three — 強化学習AIと対戦</title>
-  <meta name="description" content="DQN（Deep Q-Network）でゼロから学習させた3目並べAIとブラウザ上で対戦できます。推論はすべてブラウザ内で実行されます。">
+  <meta name="description" content="DQN（Deep Q-Network）でゼロから学習させた3目並べAIと対戦できます。学習1,000回・4,000回・20,000回など、学習途中のAIを対戦相手として選べます。">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f3460'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23e94560'/%3E%3C/svg%3E">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,6 +29,15 @@
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
+
+    #tagline {
+      font-size: 0.9rem;
+      color: #b8c4d4;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+    #tagline a { color: #e94560; text-decoration: none; }
+    #tagline a:hover { text-decoration: underline; }
 
     #status {
       font-size: 1.1rem;
@@ -124,6 +133,46 @@
     #new-game-btn:active { transform: translateY(0); }
     #new-game-btn:disabled { opacity: 0.5; cursor: default; transform: none; }
 
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      max-width: 560px;
+    }
+
+    .level-btn {
+      padding: 8px 13px;
+      font-size: 0.8rem;
+      white-space: nowrap;
+      font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.06);
+      color: #b8c4d4;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .level-btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); color: #eee; }
+    .level-btn.active {
+      background: linear-gradient(135deg, #e94560, #0f3460);
+      border-color: transparent;
+      color: #fff;
+    }
+    .level-btn:disabled { opacity: 0.45; cursor: default; }
+
+    #level-info {
+      font-size: 0.82rem;
+      color: #8fa3ba;
+      margin-bottom: 18px;
+      text-align: center;
+      min-height: 1.5em;
+      line-height: 1.6;
+    }
+    #level-info strong { color: #aad4f5; }
+
     #legend {
       display: flex;
       gap: 24px;
@@ -165,6 +214,10 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     #about th { color: #aad4f5; }
+    #about .note {
+      font-size: 0.82rem;
+      color: #8fa3ba;
+    }
     #about code {
       background: rgba(255,255,255,0.08);
       padding: 2px 6px;
@@ -176,6 +229,16 @@
 <body>
 
 <h1>Connect Three</h1>
+<p id="tagline">DQNでゼロから学習させたAIと対戦できます。<a href="#about">仕組みの解説 →</a></p>
+
+<div id="controls">
+  <button class="level-btn" data-level="0">Lv.0 学習前</button>
+  <button class="level-btn" data-level="1">Lv.1 学習1,000回</button>
+  <button class="level-btn" data-level="2">Lv.2 学習4,000回</button>
+  <button class="level-btn active" data-level="3">Lv.3 学習20,000回</button>
+</div>
+<div id="level-info"></div>
+
 <div id="status">AIを読み込んでいます...</div>
 
 <div id="board-wrapper">
@@ -206,48 +269,77 @@
   <h2>このAIについて</h2>
   <p>
     5×5盤面・重力あり（コネクトフォア型）の3目並べを、<strong>DQN（Deep Q-Network）</strong> で
-    ゼロから学習させたAIです。人間の棋譜は一切使わず、20,000回の対戦を通じて自力で戦い方を身につけました。
-  </p>
-  <p>
-    <strong>推論はすべてあなたのブラウザ内で実行されています。</strong>
-    サーバーには一切通信していません（ONNX Runtime Web + WebAssembly）。
+    ゼロから学習させたAIです。人間の棋譜は一切使わず、勝ったか負けたかという結果だけを
+    手がかりに、20,000回の対戦を通じて自力で戦い方を身につけました。
   </p>
 
+  <h2>対戦相手を選ぶ</h2>
+  <p>
+    上のボタンで、<strong>学習途中のAI</strong>を対戦相手に選べます。
+    Lv.0 は学習前（ランダムに打つだけ）、Lv.3 は学習完了後のAIです。
+    同じ設計・同じネットワークのまま、学習量だけが違います。
+    弱いレベルから順に対戦すると、学習が進むにつれて何ができるようになったのかが分かります。
+  </p>
+  <p class="note">
+    ※ 表示している勝率は、ルールベースAIと400戦させて実測した値です
+    （開幕の数手をランダムにした条件。同じ相手・同じ条件でレベル間を比較しています）。
+  </p>
+
+  <h2>構成とハイパーパラメータ</h2>
+  <p class="note">
+    ネットワーク: 入力 (3,5,5) → Conv(3→32) → Conv(32→64) → 全結合(1600→256) → 出力 (5)
+  </p>
   <table>
     <tr><th>手法</th><td>DQN（CNN + 経験再生 + ターゲットネットワーク）</td></tr>
     <tr><th>パラメータ数</th><td>430,533</td></tr>
-    <tr><th>モデルサイズ</th><td>1.7 MB</td></tr>
-    <tr><th>学習量</th><td>20,000エピソード</td></tr>
+    <tr><th>学習率</th><td>5e-4（Adam）</td></tr>
+    <tr><th>割引率 γ</th><td>0.99</td></tr>
+    <tr><th>ε（開始→終了）</th><td>1.0 → 0.10（減衰率 0.99990）</td></tr>
+    <tr><th>バッファ容量</th><td>20,000（経験再生のプール）</td></tr>
+    <tr><th>バッチサイズ</th><td>128</td></tr>
+    <tr><th>ターゲット更新間隔</th><td>500ステップ</td></tr>
     <tr><th>報酬設計</th><td>勝敗のみ（±1.0、中間報酬なし）</td></tr>
   </table>
 
-  <h2>学習の途中で見つけた落とし穴</h2>
+  <h2>もっと詳しく</h2>
   <p>
-    このAIは一度<strong>失敗作</strong>でした。「対ルールベースAI 勝率100%」を達成したのに、
-    人間が対戦すると簡単に勝ててしまったのです。調べたところ、
-    <strong>300回対戦させても棋譜はわずか2通り、AIが遭遇した盤面は11種類だけ</strong>でした
-    （状態空間 約6×10<sup>6</sup> の 0.0002%）。
+    強化学習の枠組み、Q値とベルマン方程式、DQNの学習の仕組み、
+    そして実際に学習させて分かったことをブログ記事にまとめています。
   </p>
   <p>
-    AIとルールベースAIの両方が決定論的だったため、対局が毎回ほぼ同じ1本道をなぞっていたのです。
-    「100%」の正体は実力ではなく、<strong>11局面の暗記テストで満点を取っただけ</strong>でした。
-  </p>
-  <p>
-    対策は「相手を強くする」ではなく「<strong>訪問する局面を広げる</strong>」こと。
-    開始局面をランダム化し、対戦相手にも15%のランダム性を混ぜたところ、
-    訪問局面は <code>11 → 4,477</code>（407倍）、汎化性能は <code>66.2% → 83.2%</code> に改善しました。
-  </p>
-  <p>
-    <strong>教訓: DQNの天井を決めるのは「相手の強さ」ではなく「相手が到達する局面の集合」。</strong>
+    ▶ <a href="https://qiita.com/alphajinsei/items/73f5986c3563f83c5f2c" target="_blank" rel="noopener">ブログ記事：DQNで対戦AIを作る</a><br>
+    ▶ <a href="https://github.com/alphajinsei/connect_four/tree/main/3moku" target="_blank" rel="noopener">ソースコード（GitHub）</a>
   </p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
 <script src="game.js"></script>
 <script>
+  /**
+   * 対戦相手のレベル定義。
+   *   model: null なら学習なし（ランダムに打つ）
+   *   winRate: 3moku/eval_levels.py で400戦させて実測した勝率。
+   *           相手はルールベースAI、開幕をランダム化した条件で測っている
+   *           （対ランダム相手だと Lv.1/Lv.2 がどちらも95.2%で差が出ないため）
+   *   states:  学習中にAIが遭遇した盤面の種類数
+   * モデルは選択された時点で初めて読み込む（遅延ロード）。
+   */
+  const LEVELS = [
+    { name: 'Lv.0 学習前',      model: null,                 winRate: '9.2%',  states: null,
+      desc: '学習していない状態。合法手からランダムに選ぶだけです。' },
+    { name: 'Lv.1 学習1,000回', model: 'model_ep1000.onnx',  winRate: '73.8%', states: '991',
+      desc: '学習を始めたばかり。3つ並べる形は見えてきましたが、まだ隙だらけです。' },
+    { name: 'Lv.2 学習4,000回', model: 'model_ep4000.onnx',  winRate: '79.8%', states: '2,399',
+      desc: '自分から勝ちにいけるようになった段階。油断すると負けます。' },
+    { name: 'Lv.3 学習20,000回', model: 'model.onnx',        winRate: '89.0%', states: '4,477',
+      desc: '学習完了後のAI。リーチを止め、二方向の勝ち筋を作ってきます。' },
+  ];
+
   let env = null;
-  let agent = null;
+  let agent = null;          // 現在の対戦相手
+  let currentLevel = 3;
   let busy = false;
+  const agentCache = {};     // レベル番号 → エージェント（一度読んだら使い回す）
 
   const grid = document.getElementById('grid');
   for (let r = 0; r < ROWS; r++) {
@@ -325,13 +417,63 @@
     }
   }
 
-  /** AIに1手打たせる（旧バージョンではサーバーに問い合わせていた処理） */
+  /** AIに1手打たせる */
   async function aiMove() {
     const state = env.getState(env.currentPlayer);
     const col = await agent.getAction(state, env.getValidActions());
     const row = env.applyGravity(col);
     env.step(col);
     return { col, row };
+  }
+
+  // ---- レベル切り替え ----------------------------------------------------
+
+  function renderLevelInfo() {
+    const lv = LEVELS[currentLevel];
+    const info = document.getElementById('level-info');
+    let stats = '';
+    if (lv.winRate !== null) {
+      stats = ` ／ 勝率 <strong>${lv.winRate}</strong>`;
+      if (lv.states !== null) {
+        stats += ` ／ 学習中に見た盤面 <strong>${lv.states}</strong> 種類`;
+      }
+    }
+    info.innerHTML = lv.desc + stats;
+  }
+
+  /** レベルに対応するエージェントを返す。未読み込みならここで fetch する。 */
+  async function getAgent(level) {
+    if (agentCache[level]) return agentCache[level];
+    const lv = LEVELS[level];
+    const a = lv.model === null
+      ? new RandomAgent()
+      : await DQNAgent.create(lv.model);
+    agentCache[level] = a;
+    return a;
+  }
+
+  async function selectLevel(level) {
+    if (busy || level === currentLevel) return;
+    busy = true;
+    document.querySelectorAll('.level-btn').forEach(b => {
+      b.classList.toggle('active', parseInt(b.dataset.level) === level);
+      b.disabled = true;
+    });
+    setStatus('AIを読み込んでいます...');
+    try {
+      agent = await getAgent(level);
+      currentLevel = level;
+      renderLevelInfo();
+    } catch (e) {
+      console.error(e);
+      setStatus('AIの読み込みに失敗しました: ' + e.message);
+      document.querySelectorAll('.level-btn').forEach(b => { b.disabled = false; });
+      busy = false;
+      return;
+    }
+    document.querySelectorAll('.level-btn').forEach(b => { b.disabled = false; });
+    busy = false;
+    await newGame();
   }
 
   async function newGame() {
@@ -388,10 +530,15 @@
 
   document.getElementById('new-game-btn').addEventListener('click', newGame);
 
+  document.querySelectorAll('.level-btn').forEach(b => {
+    b.addEventListener('click', () => selectLevel(parseInt(b.dataset.level)));
+  });
+
   (async () => {
     try {
       env = new Connect3Env();
-      agent = await DQNAgent.create('model.onnx');
+      agent = await getAgent(currentLevel);   // 既定は Lv.3（学習完了後）
+      renderLevelInfo();
       document.getElementById('new-game-btn').disabled = false;
       await newGame();
     } catch (e) {

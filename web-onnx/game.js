@@ -158,3 +158,13 @@ class DQNAgent {
     return bestCol;
   }
 }
+
+/**
+ * Lv.0「学習前」用のエージェント。合法手から一様ランダムに選ぶ。
+ * DQNAgent と同じインターフェースを持たせ、UI側で分岐しないようにする。
+ */
+class RandomAgent {
+  async getAction(state, validActions) {
+    return validActions[Math.floor(Math.random() * validActions.length)];
+  }
+}

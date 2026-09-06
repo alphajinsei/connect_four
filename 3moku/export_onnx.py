@@ -12,9 +12,22 @@ export_onnx.py — 学習済みDQNの重みを ONNX 形式に変換する（Web�
     **必ず同一性を検証する**（このスクリプトは変換後に自動で検証まで行う）。
 
 使い方:
+    # 最終重み → web-onnx/model.onnx
     .venv/Scripts/python 3moku/export_onnx.py
-    → web-onnx/model.onnx が生成される
+
+    # 学習途中のスナップショット → 任意の出力先
+    .venv/Scripts/python 3moku/export_onnx.py         --weights weights/snapshots/ep1000_open76_rb72_rand92pct_20260816_124656.pt         --out web-onnx/model_ep1000.onnx
+
+    Web公開版は「学習途中のAIを対戦相手として選べる」ようにしているため、
+    スナップショットも同じ手順で変換する。検証（PyTorchとの一致確認）は
+    どの重みでも同様に行われる。
+
+注意（Windows）:
+    torch.onnx.export が進捗に絵文字を出すため、cp932 のコンソールでは
+    UnicodeEncodeError で落ちる。PYTHONIOENCODING=utf-8 を付けて実行すること。
+        PYTHONIOENCODING=utf-8 .venv/Scripts/python 3moku/export_onnx.py
 """
+import argparse
 import os
 import sys
 
@@ -29,25 +42,25 @@ from agents.rule_based_agent import RuleBasedAgent
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(_SCRIPT_DIR)
-WEIGHTS_PATH = os.path.join(_SCRIPT_DIR, "weights", "dqn_connect3.pt")
+DEFAULT_WEIGHTS = os.path.join(_SCRIPT_DIR, "weights", "dqn_connect3.pt")
 OUT_DIR = os.path.join(_REPO_ROOT, "web-onnx")
-OUT_PATH = os.path.join(OUT_DIR, "model.onnx")
+DEFAULT_OUT = os.path.join(OUT_DIR, "model.onnx")
 
 N_VERIFY = 2000  # 検証に使う局面数
 
 
-def export():
-    os.makedirs(OUT_DIR, exist_ok=True)
+def export(weights_path, out_path):
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     net = QNetwork(rows=5, cols=5, output_size=5)
-    net.load_state_dict(torch.load(WEIGHTS_PATH, map_location="cpu", weights_only=True))
+    net.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     net.eval()
 
     dummy = torch.zeros(1, 3, 5, 5, dtype=torch.float32)
     torch.onnx.export(
         net,
         dummy,
-        OUT_PATH,
+        out_path,
         input_names=["board"],
         output_names=["q_values"],
         # バッチ次元を可変にしておく（将来まとめて推論したくなった場合に備える）
@@ -60,16 +73,16 @@ def export():
     import onnx
     from onnx.external_data_helper import load_external_data_for_model
 
-    model = onnx.load(OUT_PATH, load_external_data=False)
-    load_external_data_for_model(model, OUT_DIR)
-    onnx.save(model, OUT_PATH, save_as_external_data=False)
+    model = onnx.load(out_path, load_external_data=False)
+    load_external_data_for_model(model, os.path.dirname(out_path) or ".")
+    onnx.save(model, out_path, save_as_external_data=False)
 
-    data_file = OUT_PATH + ".data"
+    data_file = out_path + ".data"
     if os.path.exists(data_file):
         os.remove(data_file)
 
-    size_kb = os.path.getsize(OUT_PATH) / 1024
-    print(f"変換完了: {OUT_PATH} ({size_kb:.0f} KB, 単一ファイル)")
+    size_kb = os.path.getsize(out_path) / 1024
+    print(f"変換完了: {out_path} ({size_kb:.0f} KB, 単一ファイル)")
     return net
 
 
@@ -98,11 +111,11 @@ def collect_states(n):
     return np.array(states[:n], dtype=np.float32)
 
 
-def verify(net):
+def verify(net, out_path):
     """PyTorch と ONNX Runtime が同じ手を選ぶことを確認する。"""
     import onnxruntime as ort
 
-    sess = ort.InferenceSession(OUT_PATH, providers=["CPUExecutionProvider"])
+    sess = ort.InferenceSession(out_path, providers=["CPUExecutionProvider"])
     states = collect_states(N_VERIFY)
 
     with torch.no_grad():
@@ -141,6 +154,17 @@ def verify(net):
 
 
 if __name__ == "__main__":
-    net = export()
-    ok = verify(net)
+    ap = argparse.ArgumentParser(description="学習済みDQNの重みをONNXに変換する")
+    ap.add_argument("--weights", default=DEFAULT_WEIGHTS,
+                    help="変換元の .pt（省略時: 最終重み dqn_connect3.pt）")
+    ap.add_argument("--out", default=DEFAULT_OUT,
+                    help="出力先 .onnx（省略時: web-onnx/model.onnx）")
+    args = ap.parse_args()
+
+    # 相対パスは 3moku/ 基準で解釈する（weights/snapshots/... と書けるように）
+    weights = args.weights if os.path.isabs(args.weights) else os.path.join(_SCRIPT_DIR, args.weights)
+    out = args.out if os.path.isabs(args.out) else os.path.join(_REPO_ROOT, args.out)
+
+    net = export(weights, out)
+    ok = verify(net, out)
     sys.exit(0 if ok else 1)

@@ -2,8 +2,9 @@
 # https://developers.cloudflare.com/pages/configuration/headers/
 
 # モデルは内容が変わらない限り同じなので長期キャッシュする。
-# 1.7MB の再ダウンロードを避けて2回目以降の起動を速くする。
-/model.onnx
+# 1.7MB × 3ファイル（学習途中のスナップショット含む）の再ダウンロードを避け、
+# 2回目以降の起動とレベル切り替えを速くする。
+/*.onnx
   Cache-Control: public, max-age=31536000, immutable
 
 /game.js
